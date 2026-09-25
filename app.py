@@ -8,8 +8,8 @@ import re
 from copy import copy
 
 st.set_page_config(page_title="RAB vs LRA Generator", layout="wide")
-st.title("📊 Aplikasi Generator Laporan RAB vs LRA")
-st.markdown("Versi **Sistem Booking Baris**: Menangani tata letak Excel yang menyilang/tumpang-tindih dengan presisi 100%.")
+st.title("📊LAPORAN")
+st.markdown("RAB VS LRA")
 
 def normalize_text(text):
     t = str(text)

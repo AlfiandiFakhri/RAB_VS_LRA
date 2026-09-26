@@ -98,7 +98,7 @@ def get_row_pagu(ws, row_idx):
         return 0.0
 
 # ==========================================
-# FUNGSI PEMROSESAN DATA LRA & RAB (Disesuaikan dengan Kolom Bulan di LRA)
+# FUNGSI PEMROSESAN DATA LRA & RAB
 # ==========================================
 def parse_lra_files(file_lra_list, list_semua_bulan):
     data_realisasi = {}
@@ -110,7 +110,6 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
     
     for uploaded_lra in file_lra_list:
         uploaded_lra.seek(0)
-        # Coba baca file dengan skiprows=5, jika gagal baca normal
         try:
             df_lra = pd.read_excel(uploaded_lra, skiprows=5)
         except:
@@ -120,10 +119,8 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
         df_lra.columns = [str(c).strip() for c in df_lra.columns]
         col_upper_map = {str(c).upper(): c for c in df_lra.columns}
         
-        # Cek apakah file LRA memiliki kolom bulan secara lengkap
         has_monthly_cols = all(b in col_upper_map for b in list_semua_bulan)
         
-        # Cari kolom level & uraian
         level_col = col_upper_map.get('LEVEL', None)
         if not level_col:
             for c in df_lra.columns:
@@ -211,7 +208,6 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                     data_realisasi[kamar_unik][norm_lra] = {b: 0.0 for b in list_semua_bulan}
                     data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] = 0.0
                 
-                # Ekstraksi langsung dari kolom bulan jika tersedia di file LRA
                 if has_monthly_cols:
                     for b in list_semua_bulan:
                         col_name = col_upper_map.get(b)
@@ -634,57 +630,61 @@ if file_rab and file_lra_list:
             
             if sub_component_realisasi:
                 komp_keys = list(sub_component_realisasi.keys())
-                sub_cols = st.columns(2)
                 
-                for idx, komp_name in enumerate(komp_keys):
-                    with sub_cols[idx]:
-                        st.markdown(f"**{komp_name}**")
-                        sub_dict = sub_component_realisasi[komp_name]
-                        sub_labels = list(sub_dict.keys())
-                        sub_values = list(sub_dict.values())
-                        total_komp_val = sum(sub_values)
-                        
-                        if total_komp_val > 0:
-                            fig_donut = go.Figure(data=[go.Pie(
-                                labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels],
-                                values=sub_values,
-                                hole=0.45,
-                                textinfo='percent+label',
-                                hoverinfo='none',
-                                textfont_size=11,
-                                marker=dict(colors=chart_colors[:len(sub_labels)], line=dict(color='#FFFFFF', width=2))
-                            )])
-                            fig_donut.update_layout(
-                                plot_bgcolor="rgba(0,0,0,0)",
-                                paper_bgcolor="rgba(0,0,0,0)",
-                                margin=dict(t=20, b=20, l=20, r=20),
-                                showlegend=False,
-                                height=280
-                            )
-                            st.plotly_chart(fig_donut, use_container_width=True)
-                            
-                            head_c = st.columns([0.5, 4.5, 2.5, 2])
-                            with head_c[0]: st.markdown("")
-                            with head_c[1]: st.markdown("**Sub Komponen**")
-                            with head_c[2]: st.markdown("**Total Realisasi (Rp)**")
-                            with head_c[3]: st.markdown("**Persentase**")
-                            st.markdown("<hr style='margin: 4px 0px 8px 0px;'>", unsafe_allow_html=True)
-
-                            for i, (label, val) in enumerate(zip(sub_labels, sub_values)):
-                                color_hex = chart_colors[i % len(chart_colors)]
-                                pct = (val / total_komp_val) * 100
+                # PERBAIKAN: Render kolom secara dinamis per baris (2 komponen per baris) agar aman berapapun jumlah komponennya
+                for i in range(0, len(komp_keys), 2):
+                    row_cols = st.columns(2)
+                    for j in range(2):
+                        if i + j < len(komp_keys):
+                            komp_name = komp_keys[i + j]
+                            with row_cols[j]:
+                                st.markdown(f"**{komp_name}**")
+                                sub_dict = sub_component_realisasi[komp_name]
+                                sub_labels = list(sub_dict.keys())
+                                sub_values = list(sub_dict.values())
+                                total_komp_val = sum(sub_values)
                                 
-                                row_c = st.columns([0.5, 4.5, 2.5, 2])
-                                with row_c[0]:
-                                    st.markdown(f"<div style='width:14px; height:14px; background-color:{color_hex}; border-radius:3px; margin-top:5px;'></div>", unsafe_allow_html=True)
-                                with row_c[1]:
-                                    st.markdown(f"<span style='font-size:12px; color:#212529;'>{label}</span>", unsafe_allow_html=True)
-                                with row_c[2]:
-                                    st.markdown(f"<span style='font-size:12px; font-weight:500; color:#212529;'>Rp {val:,.0f}</span>", unsafe_allow_html=True)
-                                with row_c[3]:
-                                    st.markdown(f"<span style='font-size:12px; font-weight:600; color:#495057;'>{pct:.2f}%</span>", unsafe_allow_html=True)
-                        else:
-                            st.info("Belum ada realisasi anggaran pada komponen ini.")
+                                if total_komp_val > 0:
+                                    fig_donut = go.Figure(data=[go.Pie(
+                                        labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels],
+                                        values=sub_values,
+                                        hole=0.45,
+                                        textinfo='percent+label',
+                                        hoverinfo='none',
+                                        textfont_size=11,
+                                        marker=dict(colors=chart_colors[:len(sub_labels)], line=dict(color='#FFFFFF', width=2))
+                                    )])
+                                    fig_donut.update_layout(
+                                        plot_bgcolor="rgba(0,0,0,0)",
+                                        paper_bgcolor="rgba(0,0,0,0)",
+                                        margin=dict(t=20, b=20, l=20, r=20),
+                                        showlegend=False,
+                                        height=280
+                                    )
+                                    st.plotly_chart(fig_donut, use_container_width=True, key=f"donut_{i}_{j}")
+                                    
+                                    head_c = st.columns([0.5, 4.5, 2.5, 2])
+                                    with head_c[0]: st.markdown("")
+                                    with head_c[1]: st.markdown("**Sub Komponen**")
+                                    with head_c[2]: st.markdown("**Total Realisasi (Rp)**")
+                                    with head_c[3]: st.markdown("**Persentase**")
+                                    st.markdown("<hr style='margin: 4px 0px 8px 0px;'>", unsafe_allow_html=True)
+
+                                    for k, (label, val) in enumerate(zip(sub_labels, sub_values)):
+                                        color_hex = chart_colors[k % len(chart_colors)]
+                                        pct = (val / total_komp_val) * 100
+                                        
+                                        row_c = st.columns([0.5, 4.5, 2.5, 2])
+                                        with row_c[0]:
+                                            st.markdown(f"<div style='width:14px; height:14px; background-color:{color_hex}; border-radius:3px; margin-top:5px;'></div>", unsafe_allow_html=True)
+                                        with row_c[1]:
+                                            st.markdown(f"<span style='font-size:12px; color:#212529;'>{label}</span>", unsafe_allow_html=True)
+                                        with row_c[2]:
+                                            st.markdown(f"<span style='font-size:12px; font-weight:500; color:#212529;'>Rp {val:,.0f}</span>", unsafe_allow_html=True)
+                                        with row_c[3]:
+                                            st.markdown(f"<span style='font-size:12px; font-weight:600; color:#495057;'>{pct:.2f}%</span>", unsafe_allow_html=True)
+                                else:
+                                    st.info("Belum ada realisasi anggaran pada komponen ini.")
             else:
                 st.info("Data realisasi sub komponen belum tersedia.")
 

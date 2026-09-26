@@ -6,6 +6,7 @@ from openpyxl.utils import get_column_letter
 import io
 import re
 from copy import copy
+import plotly.express as px
 
 # Pengaman untuk Library PowerPoint
 try:
@@ -283,10 +284,13 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
                 try: pagu_val = float(pagu_val)
                 except: pagu_val = 0
 
+                total_realisasi_row = sum(row_bulanan_val.values()) + nilai_outstanding
+
                 summary_preview.append({
                     "Komponen": rab_komp,
                     "Uraian": uraian_rab,
                     "Pagu": pagu_val,
+                    "Realisasi": total_realisasi_row,
                     "Outstanding": nilai_outstanding,
                     **row_bulanan_val
                 })
@@ -351,7 +355,7 @@ if file_rab and file_lra_list:
             st.subheader("📈 Dashboard Ringkasan Eksekutif (Executive Summary)")
             
             total_pagu_all = satker_summary["pagu"]
-            total_realisasi_incl_out = satker_summary["realisasi"] # Nilai Satker LRA resmi (sudah mencakup akumulasi)
+            total_realisasi_incl_out = satker_summary["realisasi"]
             total_sisa_all = satker_summary["sisa"]
             persen_nasional = (total_realisasi_incl_out / total_pagu_all * 100) if total_pagu_all > 0 else 0
 
@@ -363,18 +367,37 @@ if file_rab and file_lra_list:
             m4.metric("📊 Tingkat Penyerapan", f"{persen_nasional:.2f}%")
 
             st.markdown("---")
-            st.markdown("### 📊 Grafik Tren Penyerapan Anggaran Bulanan")
             
-            # URUTKAN BULAN KRONOLOGIS KIRI KE KANAN MENGGUNAKAN NOMOR PREFIX
-            monthly_sorted = {f"{i+1:02d}. {b}": monthly_totals[b] for i, b in enumerate(list_semua_bulan)}
-            s_bulan = pd.Series(monthly_sorted)
-            st.bar_chart(s_bulan)
+            # TAMPILAN GRAFIK (BAR & PIE) DALAM 2 KOLOM
+            col_chart1, col_chart2 = st.columns(2)
+            
+            with col_chart1:
+                st.markdown("### 📊 Tren Penyerapan Bulanan")
+                monthly_sorted = {f"{i+1:02d}. {b}": monthly_totals[b] for i, b in enumerate(list_semua_bulan)}
+                s_bulan = pd.Series(monthly_sorted)
+                st.bar_chart(s_bulan)
+
+            with col_chart2:
+                st.markdown("### 🥧 Proporsi Pagu per Komponen")
+                if not df_preview.empty:
+                    df_comp = df_preview.groupby("Komponen")["Pagu"].sum().reset_index()
+                    fig_pie = px.pie(
+                        df_comp, 
+                        names="Komponen", 
+                        values="Pagu", 
+                        hole=0.4,
+                        color_discrete_sequence=px.colors.qualitative.Pastel
+                    )
+                    fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+                    st.plotly_chart(fig_pie, use_container_width=True)
+                else:
+                    st.info("Data komponen belum tersedia.")
 
             with st.expander("🔍 Pratinjau & Filter Data Konsolidasi", expanded=False):
                 if not df_preview.empty:
                     komponen_list = df_preview['Komponen'].unique()
-                    selected_komp = st.multiselect("Filter Berdasarkan Komponen:", options=komponen_list, default=komponen_list)
-                    df_filtered = df_preview[df_preview['Komponen'].isin(selected_komp)]
+                    selected_comp = st.multiselect("Filter Berdasarkan Komponen:", options=komponen_list, default=komponen_list)
+                    df_filtered = df_preview[df_preview['Komponen'].isin(selected_comp)]
                     st.dataframe(df_filtered, use_container_width=True)
 
             st.divider()

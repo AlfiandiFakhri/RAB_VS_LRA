@@ -10,7 +10,7 @@ from copy import copy
 # ==========================================
 # KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="RAB vs LRA Generator", layout="wide", page_icon="📊")
+st.set_page_config(page_title="RAB vs LRA Executive Generator", layout="wide", page_icon="📊")
 
 def normalize_text(text):
     t = str(text)
@@ -195,6 +195,7 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     data_ditemukan = 0
     rab_komp, rab_sub, rab_akun = "GLOBAL", "GLOBAL", "GLOBAL"
     baris_terpakai = set()
+    summary_preview = []
 
     for row_idx in range(baris_mulai_data, max_row + 1):
         kode_col = str(ws.cell(row=row_idx, column=2).value).strip()
@@ -252,13 +253,28 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
                 
                 cell_outstanding.value = nilai_outstanding
                 
+                row_bulanan_val = {}
                 for idx_b, b_name in enumerate(list_semua_bulan):
                     col_target_bulan = 23 + idx_b 
                     cell_bulan = ws.cell(row=target_row, column=col_target_bulan)
-                    cell_bulan.value = dict_bulanan[b_name]
+                    val_b = dict_bulanan[b_name]
+                    cell_bulan.value = val_b
+                    row_bulanan_val[b_name] = val_b
                 
                 cell_realisasi.value = f"=SUM(W{target_row}:AH{target_row})+V{target_row}"
                 cell_sisa.value = f"=S{target_row}-T{target_row}"
+
+                pagu_val = ws.cell(row=target_row, column=19).value or 0
+                try: pagu_val = float(pagu_val)
+                except: pagu_val = 0
+
+                summary_preview.append({
+                    "Komponen": rab_komp,
+                    "Uraian": uraian_rab,
+                    "Pagu": pagu_val,
+                    "Outstanding": nilai_outstanding,
+                    **row_bulanan_val
+                })
 
                 data_ref = ws.cell(row=target_row, column=19)
                 
@@ -276,13 +292,13 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     wb.save(output)
     output.seek(0)
     
-    return output, data_ditemukan
+    return output, data_ditemukan, pd.DataFrame(summary_preview)
 
 # ==========================================
 # ANTARMUKA PENGGUNA (UI)
 # ==========================================
-st.title("📊 LAPORAN RAB VS LRA")
-st.markdown("**Konsolidasi Laporan Anggaran Multi-Bulan (Januari - Desember)**")
+st.title("📊 EXECUTIVE RAB VS LRA GENERATOR")
+st.markdown("**Konsolidasi Laporan Anggaran Multi-Bulan & Executive Summary (Kementerian Koperasi dan UKM)**")
 st.divider()
 
 col1, col2 = st.columns(2)
@@ -303,23 +319,66 @@ if file_rab and file_lra_list:
         ]
         
         try:
-            with st.status("Sedang memproses dokumen...", expanded=True) as status:
+            with st.status("Sedang memproses dokumen dan menyusun ringkasan...", expanded=True) as status:
                 st.write("Mengekstrak data dari seluruh LRA (Realisasi & Outstanding)...")
                 data_realisasi = parse_lra_files(file_lra_list, list_semua_bulan)
                 
                 st.write("Menyelaraskan dan memodifikasi template RAB...")
-                output_excel, data_ditemukan = process_rab_lra(file_rab, data_realisasi, list_semua_bulan)
+                output_excel, data_ditemukan, df_preview = process_rab_lra(file_rab, data_realisasi, list_semua_bulan)
                 
                 status.update(label="Proses Selesai!", state="complete", expanded=False)
 
             st.success(f"🎉 SUKSES! Berhasil menyelaraskan **{data_ditemukan} baris** data RAB dengan data LRA bulanan.")
+            st.divider()
+
+            # ==========================================
+            # DASHBOARD EXECUTIVE SUMMARY METRICS
+            # ==========================================
+            st.subheader("📈 Dashboard Ringkasan Eksekutif (Executive Summary)")
             
+            total_pagu_all = df_preview['Pagu'].sum() if not df_preview.empty else 0
+            total_out_all = df_preview['Outstanding'].sum() if not df_preview.empty else 0
+            
+            monthly_sums = {}
+            for b in list_semua_bulan:
+                if not df_preview.empty and b in df_preview.columns:
+                    monthly_sums[b] = df_preview[b].sum()
+                else:
+                    monthly_sums[b] = 0
+            
+            total_realisasi_bulanan = sum(monthly_sums.values())
+            total_realisasi_incl_out = total_realisasi_bulanan + total_out_all
+            total_sisa_all = total_pagu_all - total_realisasi_incl_out
+            persen_nasional = (total_realisasi_incl_out / total_pagu_all * 100) if total_pagu_all > 0 else 0
+
+            # Kartu Metrik Utama
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("💰 Total Pagu Anggaran", f"Rp {total_pagu_all:,.0f}")
+            m2.metric("📉 Total Realisasi (+ Outstd)", f"Rp {total_realisasi_incl_out:,.0f}")
+            m3.metric("🟡 Sisa Anggaran", f"Rp {total_sisa_all:,.0f}")
+            m4.metric("📊 Tingkat Penyerapan", f"{persen_nasional:.2f}%")
+
+            st.markdown("---")
+            st.markdown("### 📊 Grafik Tren Penyerapan Anggaran Bulanan")
+            s_bulan = pd.Series(monthly_sums)
+            st.bar_chart(s_bulan)
+
+            with st.expander("🔍 Pratinjau & Filter Data Konsolidasi", expanded=False):
+                if not df_preview.empty:
+                    komponen_list = df_preview['Komponen'].unique()
+                    selected_komp = st.multiselect("Filter Berdasarkan Komponen:", options=komponen_list, default=komponen_list)
+                    df_filtered = df_preview[df_preview['Komponen'].isin(selected_komp)]
+                    st.dataframe(df_filtered, use_container_width=True)
+
+            st.divider()
+            st.subheader("📥 Download Berkas Laporan Akhir")
             st.download_button(
-                label="⬇️ Download Laporan Akhir (.xlsx)",
+                label="⬇️ Download Laporan Excel (.xlsx)",
                 data=output_excel,
                 file_name="LAPORAN_RAB_LRA_LENGKAP_JAN_DES.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary"
+                type="primary",
+                use_container_width=True
             )
 
         except Exception as e:

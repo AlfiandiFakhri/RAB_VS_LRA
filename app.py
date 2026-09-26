@@ -100,6 +100,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
     satker_summary = {"pagu": 0, "realisasi": 0, "sisa": 0, "outstanding": 0}
     monthly_totals = {b: 0 for b in list_semua_bulan}
     component_summary = {}
+    component_metrics = {} # Menyimpan metrik detail per komponen
     sub_component_realisasi = {}
     
     for uploaded_lra in file_lra_list:
@@ -151,11 +152,17 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 uraian = str(row_lra.get('Kode / Uraian', '')).strip()
                 pagu = float(row_lra.get('Pagu') or 0)
                 realisasi_sub = float(row_lra.get('Total Realisasi') or 0)
+                sisa_sub = float(row_lra.get('Sisa') or 0)
                 
                 if lvl == 'Komponen':
                     current_komp = uraian
-                    if current_komp not in component_summary or pagu > 0:
-                        component_summary[current_komp] = pagu
+                    component_summary[current_komp] = pagu
+                    component_metrics[current_komp] = {
+                        "pagu": pagu,
+                        "realisasi": realisasi_sub,
+                        "sisa": sisa_sub,
+                        "persen": (realisasi_sub / pagu * 100) if pagu > 0 else 0
+                    }
                 elif lvl == 'Sub Komponen':
                     if current_komp:
                         if current_komp not in sub_component_realisasi:
@@ -225,7 +232,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 if is_outstanding_file:
                     data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] += outstanding_val
                 
-    return data_realisasi, satker_summary, monthly_totals, component_summary, sub_component_realisasi
+    return data_realisasi, satker_summary, monthly_totals, component_summary, component_metrics, sub_component_realisasi
 
 def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     wb = load_workbook(file_rab)
@@ -396,7 +403,7 @@ if file_rab and file_lra_list:
         try:
             with st.status("Sedang memproses dokumen dan menyusun ringkasan...", expanded=True) as status:
                 st.write("Mengekstrak data dari seluruh LRA (Realisasi & Outstanding)...")
-                data_realisasi, satker_summary, monthly_totals, component_summary, sub_component_realisasi = parse_lra_files(file_lra_list, list_semua_bulan)
+                data_realisasi, satker_summary, monthly_totals, component_summary, component_metrics, sub_component_realisasi = parse_lra_files(file_lra_list, list_semua_bulan)
                 
                 st.write("Menyelaraskan dan memodifikasi template RAB...")
                 output_excel, data_ditemukan, df_preview = process_rab_lra(file_rab, data_realisasi, list_semua_bulan)
@@ -416,12 +423,26 @@ if file_rab and file_lra_list:
             total_sisa_all = satker_summary["sisa"]
             persen_nasional = (total_realisasi_incl_out / total_pagu_all * 100) if total_pagu_all > 0 else 0
 
-            # Kartu Metrik Utama
+            # Kartu Metrik Utama Nasional
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("💰 Total Pagu Anggaran", f"Rp {total_pagu_all:,.0f}")
             m2.metric("📉 Total Realisasi", f"Rp {total_realisasi_incl_out:,.0f}")
             m3.metric("🟡 Sisa Anggaran", f"Rp {total_sisa_all:,.0f}")
             m4.metric("📊 Tingkat Penyerapan", f"{persen_nasional:.2f}%")
+
+            # --- KARTU METRIK PER 2 KOMPONEN UTAMA ---
+            if component_metrics:
+                st.markdown("---")
+                st.markdown("### 🏷️ Ringkasan Per Komponen")
+                comp_cols = st.columns(len(component_metrics))
+                for idx, (komp_name, metrics) in enumerate(component_metrics.items()):
+                    with comp_cols[idx]:
+                        st.markdown(f"**{komp_name}**")
+                        sub_m1, sub_m2, sub_m3, sub_m4 = st.columns(4)
+                        sub_m1.metric("Pagu", f"Rp {metrics['pagu']:,.0f}")
+                        sub_m2.metric("Realisasi", f"Rp {metrics['realisasi']:,.0f}")
+                        sub_m3.metric("Sisa", f"Rp {metrics['sisa']:,.0f}")
+                        sub_m4.metric("Penyerapan", f"{metrics['persen']:.2f}%")
 
             st.markdown("---")
             

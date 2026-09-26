@@ -100,7 +100,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
     satker_summary = {"pagu": 0, "realisasi": 0, "sisa": 0, "outstanding": 0}
     monthly_totals = {b: 0 for b in list_semua_bulan}
     component_summary = {}
-    sub_component_summary = {}
+    sub_component_realisasi = {} # Menyimpan Total Realisasi per Sub Komponen
     
     for uploaded_lra in file_lra_list:
         uploaded_lra.seek(0)
@@ -150,6 +150,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 lvl = str(row_lra.get('Level')).strip()
                 uraian = str(row_lra.get('Kode / Uraian', '')).strip()
                 pagu = float(row_lra.get('Pagu') or 0)
+                realisasi_sub = float(row_lra.get('Total Realisasi') or 0)
                 
                 if lvl == 'Komponen':
                     current_komp = uraian
@@ -157,9 +158,11 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                         component_summary[current_komp] = pagu
                 elif lvl == 'Sub Komponen':
                     if current_komp:
-                        if current_komp not in sub_component_summary:
-                            sub_component_summary[current_komp] = {}
-                        sub_component_summary[current_komp][uraian] = pagu
+                        if current_komp not in sub_component_realisasi:
+                            sub_component_realisasi[current_komp] = {}
+                        # Hanya ambil jika realisasi > 0 agar grafik bersih dari angka 0
+                        if realisasi_sub > 0:
+                            sub_component_realisasi[current_komp][uraian] = realisasi_sub
 
         if is_outstanding_file:
             satker_row = df_lra[df_lra['Level'].astype(str).str.strip() == 'Satker']
@@ -223,7 +226,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 if is_outstanding_file:
                     data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] += outstanding_val
                 
-    return data_realisasi, satker_summary, monthly_totals, component_summary, sub_component_summary
+    return data_realisasi, satker_summary, monthly_totals, component_summary, sub_component_realisasi
 
 def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     wb = load_workbook(file_rab)
@@ -394,7 +397,7 @@ if file_rab and file_lra_list:
         try:
             with st.status("Sedang memproses dokumen dan menyusun ringkasan...", expanded=True) as status:
                 st.write("Mengekstrak data dari seluruh LRA (Realisasi & Outstanding)...")
-                data_realisasi, satker_summary, monthly_totals, component_summary, sub_component_summary = parse_lra_files(file_lra_list, list_semua_bulan)
+                data_realisasi, satker_summary, monthly_totals, component_summary, sub_component_realisasi = parse_lra_files(file_lra_list, list_semua_bulan)
                 
                 st.write("Menyelaraskan dan memodifikasi template RAB...")
                 output_excel, data_ditemukan, df_preview = process_rab_lra(file_rab, data_realisasi, list_semua_bulan)
@@ -430,19 +433,18 @@ if file_rab and file_lra_list:
             st.bar_chart(s_bulan)
 
             st.markdown("---")
-            st.markdown("### 🥧 Rincian Proporsi Sub Komponen per Komponen")
+            st.markdown("### 🥧 Proporsi Total Realisasi Sub Komponen per Komponen")
             
-            # TAMPILKAN 2 DIAGRAM PIE BERDAMPINGAN UNTUK 2 KOMPONEN UTAMA
-            if sub_component_summary:
-                komp_keys = list(sub_component_summary.keys())
+            # TAMPILKAN 2 DIAGRAM PIE BERDAMPINGAN BERDASARKAN TOTAL REALISASI
+            if sub_component_realisasi:
+                komp_keys = list(sub_component_realisasi.keys())
                 
-                # Buat 2 kolom berdampingan
                 sub_cols = st.columns(len(komp_keys) if len(komp_keys) > 0 else 2)
                 
                 for idx, komp_name in enumerate(komp_keys):
                     with sub_cols[idx]:
                         st.markdown(f"**{komp_name}**")
-                        sub_dict = sub_component_summary[komp_name]
+                        sub_dict = sub_component_realisasi[komp_name]
                         sub_labels = list(sub_dict.keys())
                         sub_values = list(sub_dict.values())
                         
@@ -460,12 +462,11 @@ if file_rab and file_lra_list:
                                 sub_values, 
                                 autopct=make_autopct(sub_values), 
                                 startangle=90,
-                                colors=plt.cm.Pastel2.colors,
+                                colors=plt.cm.Set2.colors,
                                 textprops=dict(color="black", fontsize=7)
                             )
                             ax.axis('equal')
                             
-                            # Legend di bawah masing-masing pie chart agar rapi
                             ax.legend(
                                 wedges, 
                                 sub_labels, 
@@ -477,9 +478,9 @@ if file_rab and file_lra_list:
                             
                             st.pyplot(fig)
                         else:
-                            st.info("Nilai sub komponen bernilai 0.")
+                            st.info("Belum ada realisasi anggaran pada komponen ini.")
             else:
-                st.info("Data sub komponen belum tersedia.")
+                st.info("Data realisasi sub komponen belum tersedia.")
 
             with st.expander("🔍 Pratinjau & Filter Data Konsolidasi", expanded=False):
                 if not df_preview.empty:

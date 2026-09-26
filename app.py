@@ -6,7 +6,8 @@ from openpyxl.utils import get_column_letter
 import io
 import re
 from copy import copy
-import matplotlib.pyplot as plt
+import plotly.express as px
+import plotly.graph_objects as go
 
 # Pengaman untuk Library PowerPoint
 try:
@@ -145,8 +146,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
         if ada_gup_spm and not bulan_file:
             is_outstanding_file = True
 
-        # Khusus ambil data Komponen dan Sub Komponen secara akurat dari file Outstanding / All Periode
-        if is_outstanding_file or 'Level' in df_lra.columns:
+        if 'Level' in df_lra.columns:
             current_komp = ""
             for _, row_lra in df_lra.iterrows():
                 lvl = str(row_lra.get('Level')).strip()
@@ -158,7 +158,6 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 if lvl == 'Komponen':
                     current_komp = uraian
                     component_summary[current_komp] = pagu
-                    # Hanya timpa component_metrics jika file ini adalah file rekap utama (outstanding / all periode)
                     if is_outstanding_file or current_komp not in component_metrics or realisasi_sub > component_metrics[current_komp]['realisasi']:
                         component_metrics[current_komp] = {
                             "pagu": pagu,
@@ -451,19 +450,36 @@ if file_rab and file_lra_list:
 
             st.markdown("---")
             
-            # TAMPILAN GRAFIK BULANAN
-            st.markdown("### 📊 Tren Penyerapan Bulanan")
-            monthly_sorted = {f"{i+1:02d}. {b}": monthly_totals[b] for i, b in enumerate(list_semua_bulan)}
-            s_bulan = pd.Series(monthly_sorted)
-            st.bar_chart(s_bulan)
+            # TAMPILAN GRAFIK BULANAN 3D INTERAKTIF (PLOTLY)
+            st.markdown("### 📊 Tren Penyerapan Bulanan (3D Style)")
+            df_monthly_chart = pd.DataFrame({
+                "Bulan": list(monthly_totals.keys()),
+                "Realisasi": list(monthly_totals.values())
+            })
+            fig_monthly = px.bar(
+                df_monthly_chart, 
+                x="Bulan", 
+                y="Realisasi",
+                text_auto='.2s',
+                title="Grafik Penyerapan Anggaran Bulanan",
+                color="Realisasi",
+                color_continuous_scale="Viridis"
+            )
+            fig_monthly.update_layout(
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="black"),
+                xaxis_title="Bulan",
+                yaxis_title="Total Realisasi (Rp)"
+            )
+            st.plotly_chart(fig_monthly, use_container_width=True)
 
             st.markdown("---")
-            st.markdown("### 🥧 Proporsi Total Realisasi Sub Komponen per Komponen")
+            st.markdown("### 🥧 Proporsi Total Realisasi Sub Komponen per Komponen (Interactive 3D / Donut Style)")
             
-            # TAMPILKAN 2 DIAGRAM PIE BERDAMPINGAN KIRI-KANAN
+            # TAMPILKAN 2 DIAGRAM DONUT/PIE 3D-STYLE BERDAMPINGAN KIRI-KANAN MENGGUNAKAN PLOTLY
             if sub_component_realisasi:
                 komp_keys = list(sub_component_realisasi.keys())
-                
                 sub_cols = st.columns(len(komp_keys) if len(komp_keys) > 0 else 2)
                 
                 for idx, komp_name in enumerate(komp_keys):
@@ -474,34 +490,24 @@ if file_rab and file_lra_list:
                         sub_values = list(sub_dict.values())
                         
                         if sum(sub_values) > 0:
-                            fig, ax = plt.subplots(figsize=(6, 5))
-                            
-                            def make_autopct(values):
-                                def my_autopct(pct):
-                                    total = sum(values)
-                                    val = int(round(pct * total / 100.0))
-                                    return f"{pct:.1f}%\n(Rp {val:,.0f})"
-                                return my_autopct
-
-                            wedges, texts, autotexts = ax.pie(
-                                sub_values, 
-                                autopct=make_autopct(sub_values), 
-                                startangle=90,
-                                colors=plt.cm.Set2.colors,
-                                textprops=dict(color="black", fontsize=7)
+                            fig_pie = go.Figure(data=[go.Pie(
+                                labels=sub_labels,
+                                values=sub_values,
+                                hole=0.3, # Efek Donut 3D modern
+                                textinfo='label+percent',
+                                hoverinfo='label+value+percent',
+                                textfont_size=10,
+                                marker=dict(colors=px.colors.qualitative.Pastel)
+                            )])
+                            fig_pie.update_layout(
+                                title=f"Rincian Sub Komponen",
+                                plot_bgcolor="rgba(0,0,0,0)",
+                                paper_bgcolor="rgba(0,0,0,0)",
+                                margin=dict(t=30, b=30, l=10, r=10),
+                                showlegend=True,
+                                legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
                             )
-                            ax.axis('equal')
-                            
-                            ax.legend(
-                                wedges, 
-                                sub_labels, 
-                                title="Sub Komponen", 
-                                loc="center left", 
-                                bbox_to_anchor=(1, 0, 0.5, 1),
-                                fontsize=7
-                            )
-                            
-                            st.pyplot(fig)
+                            st.plotly_chart(fig_pie, use_container_width=True)
                         else:
                             st.info("Belum ada realisasi anggaran pada komponen ini.")
             else:

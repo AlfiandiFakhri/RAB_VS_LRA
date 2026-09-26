@@ -234,7 +234,6 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 
                 if bulan_file:
                     data_realisasi[kamar_unik][norm_lra][bulan_file] += realisasi
-                    monthly_totals[bulan_file] += realisasi
                 
                 if is_outstanding_file:
                     data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] += outstanding_val
@@ -565,6 +564,10 @@ if file_rab and file_lra_list:
                 
                 st.write("Menyelaraskan dan memodifikasi template RAB...")
                 output_excel, data_ditemukan, df_preview = process_rab_lra(file_rab, data_realisasi, list_semua_bulan)
+                
+                # PERBAIKAN UTAMA: Hitung monthly_totals secara akurat langsung dari baris detail RAB yang berhasil diselaraskan (df_preview)
+                if not df_preview.empty:
+                    monthly_totals = {b: df_preview[b].sum() if b in df_preview.columns else 0.0 for b in list_semua_bulan}
                 
                 st.write("Menyiapkan dokumen presentasi PowerPoint (.pptx)...")
                 ppt_output = create_powerpoint_report(satker_summary, component_metrics, monthly_totals, sub_component_realisasi)

@@ -54,7 +54,8 @@ def match_texts_smart(t1, t2):
 # ==========================================
 def parse_lra_files(file_lra_list, list_semua_bulan):
     data_realisasi = {}
-    akun_outstanding_map = {} # Peta cadangan Outstanding per Akun
+    akun_outstanding_map = {}
+    detail_outstanding_map = {}
     
     for uploaded_lra in file_lra_list:
         df_raw = pd.read_excel(uploaded_lra, header=None, nrows=15)
@@ -78,7 +79,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                         break
                 if bulan_file: break
 
-        # 3. Deteksi File Outstanding
+        # 3. Deteksi File Outstanding / All Periode
         fname_clean = fname_upper.replace(" ", "")
         keyword_out = ["SEMUA", "LEVEL", "ALL", "PERIODE", "REKAP", "GUP"]
         if any(kw in fname_clean for kw in keyword_out) and not bulan_file:
@@ -86,7 +87,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
 
         for r in range(len(df_raw)):
             row_text_raw = " ".join(str(val) for val in df_raw.iloc[r].values if pd.notna(val)).upper()
-            if "SEMUA" in row_text_raw or "LEVEL" in row_text_raw or "ALL" in row_text_raw or "PERIODE" in row_text_raw:
+            if any(k in row_text_raw for k in ["SEMUA", "LEVEL", "ALL", "PERIODE"]):
                 if not bulan_file:
                     is_outstanding_file = True
                     break
@@ -113,20 +114,10 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
             except: realisasi = 0
             if pd.isna(realisasi): realisasi = 0
                 
-            outstanding_val = 0
-            if is_outstanding_file:
-                val_gup = row.get('GUP', 0)
-                val_spm = row.get('SPM', 0)
-                val_verifikasi = row.get('Verifikasi', 0)
-                
-                try: val_gup = float(val_gup)
-                except: val_gup = 0
-                try: val_spm = float(val_spm)
-                except: val_spm = 0
-                try: val_verifikasi = float(val_verifikasi)
-                except: val_verifikasi = 0
-                
-                outstanding_val = val_gup + val_spm + val_verifikasi
+            val_gup = float(row.get('GUP') or 0) if pd.notna(row.get('GUP')) else 0.0
+            val_spm = float(row.get('SPM') or 0) if pd.notna(row.get('SPM')) else 0.0
+            val_verifikasi = float(row.get('Verifikasi') or 0) if pd.notna(row.get('Verifikasi')) else 0.0
+            outstanding_val = val_gup + val_spm + val_verifikasi
                 
             if lvl == 'Komponen':
                 match = re.search(r'(\d{3})\s*-', uraian)
@@ -142,9 +133,13 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
             
             kamar_unik = f"{cur_komp}_{cur_sub}_{cur_akun}"
             
-            # Jika ini adalah baris Akun pada file Outstanding, simpan ke peta cadangan akun
-            if is_outstanding_file and lvl == 'Akun' and outstanding_val > 0:
-                akun_outstanding_map[kamar_unik] = outstanding_val
+            # Simpan peta Outstanding Akun & Detail secara presisi
+            if is_outstanding_file:
+                if lvl == 'Akun' and cur_akun and outstanding_val > 0:
+                    akun_outstanding_map[cur_akun] = akun_outstanding_map.get(cur_akun, 0) + outstanding_val
+                elif lvl == 'Detail' and outstanding_val > 0:
+                    norm_det = normalize_text(uraian)
+                    detail_outstanding_map[(cur_akun, norm_det)] = outstanding_val
 
             if kamar_unik not in data_realisasi: 
                 data_realisasi[kamar_unik] = {}
@@ -162,9 +157,9 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 if is_outstanding_file:
                     data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] += outstanding_val
                 
-    return data_realisasi, akun_outstanding_map
+    return data_realisasi, akun_outstanding_map, detail_outstanding_map
 
-def process_rab_lra(file_rab, data_realisasi, akun_outstanding_map, list_semua_bulan):
+def process_rab_lra(file_rab, data_realisasi, akun_outstanding_map, detail_outstanding_map, list_semua_bulan):
     wb = load_workbook(file_rab)
     ws = wb.active 
     
@@ -250,22 +245,23 @@ def process_rab_lra(file_rab, data_realisasi, akun_outstanding_map, list_semua_b
                             break
                 if matched_key: break
             
-            # Jika ditemukan kecocokan data bulanan
             if matched_key:
                 kamar_ketemu, key_ketemu = matched_key
                 dict_bulanan = data_realisasi[kamar_ketemu].pop(key_ketemu) 
                 nilai_outstanding = dict_bulanan.pop('OUTSTANDING', 0)
             else:
-                # Fallback dictionary kosong jika tidak match tapi baris terpakai
                 dict_bulanan = {b: 0 for b in list_semua_bulan}
                 nilai_outstanding = 0
 
-            # WARISAN (INHERITANCE): Jika nilai outstanding 0, ambil dari peta induk akun
-            if nilai_outstanding == 0 and kamar_rab_saat_ini in akun_outstanding_map:
-                nilai_outstanding = akun_outstanding_map[kamar_rab_saat_ini]
+            # Cek Fallback / Warisan Outstanding berdasarkan Detail atau Akun
+            if nilai_outstanding == 0:
+                if (rab_akun, norm_rab) in detail_outstanding_map:
+                    nilai_outstanding = detail_outstanding_map[(rab_akun, norm_rab)]
+                elif rab_akun in akun_outstanding_map:
+                    # Distribusikan atau pasang pada akun/detail terkait
+                    nilai_outstanding = akun_outstanding_map[rab_akun]
 
-            # Hanya proses jika ada realisasi bulanan atau outstanding yang > 0
-            if sum(dict_bulanan.values()) > 0 or nilai_outstanding > 0 or matched_key:
+            if sum(dict_bulanan.values()) > 0 or nilai_outstanding > 0 or matched_key or rab_akun != "GLOBAL":
                 target_row = row_idx
                 for r_cek in range(row_idx, min(row_idx + 6, max_row + 1)):
                     val_s = ws.cell(row=r_cek, column=19).value
@@ -280,7 +276,7 @@ def process_rab_lra(file_rab, data_realisasi, akun_outstanding_map, list_semua_b
                 cell_outstanding = ws.cell(row=target_row, column=22) 
                 cell_persen = ws.cell(row=target_row, column=35)      
                 
-                cell_outstanding.value = nilai_outstanding
+                cell_outstanding.value = nilai_outstanding if nilai_outstanding > 0 else 0
                 
                 row_bulanan_val = {}
                 for idx_b, b_name in enumerate(list_semua_bulan):
@@ -384,10 +380,12 @@ if file_rab and file_lra_list:
         try:
             with st.status("Sedang memproses dokumen dan menyelaraskan data...", expanded=True) as status:
                 st.write("Mengekstrak data realisasi bulanan dan outstanding...")
-                data_realisasi, akun_outstanding_map = parse_lra_files(file_lra_list, list_semua_bulan)
+                data_realisasi, akun_outstanding_map, detail_outstanding_map = parse_lra_files(file_lra_list, list_semua_bulan)
                 
                 st.write("Memodifikasi dan memasukkan rumus ke template RAB...")
-                output_excel, data_ditemukan, df_preview = process_rab_lra(file_rab, data_realisasi, akun_outstanding_map, list_semua_bulan)
+                output_excel, data_ditemukan, df_preview = process_rab_lra(
+                    file_rab, data_realisasi, akun_outstanding_map, detail_outstanding_map, list_semua_bulan
+                )
                 
                 status.update(label="Konsolidasi Selesai!", state="complete", expanded=False)
 

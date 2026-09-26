@@ -100,7 +100,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
     satker_summary = {"pagu": 0, "realisasi": 0, "sisa": 0, "outstanding": 0}
     monthly_totals = {b: 0 for b in list_semua_bulan}
     component_summary = {}
-    sub_component_summary = {} # Menyimpan rincian per Sub Komponen
+    sub_component_summary = {}
     
     for uploaded_lra in file_lra_list:
         uploaded_lra.seek(0)
@@ -144,14 +144,8 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
         if ada_gup_spm and not bulan_file:
             is_outstanding_file = True
 
-        if is_outstanding_file:
-            satker_row = df_lra[df_lra['Level'].astype(str).str.strip() == 'Satker']
-            if not satker_row.empty:
-                satker_summary["pagu"] = float(satker_row['Pagu'].values[0] or 0)
-                satker_summary["realisasi"] = float(satker_row['Total Realisasi'].values[0] or 0)
-                satker_summary["sisa"] = float(satker_row['Sisa'].values[0] or 0)
-            
-            # Ekstrak Komponen & Sub Komponen dari LRA All Periode
+        # Selalu cek dan ambil data Komponen & Sub Komponen jika file memiliki kolom Level
+        if 'Level' in df_lra.columns:
             current_komp = ""
             for _, row_lra in df_lra.iterrows():
                 lvl = str(row_lra.get('Level')).strip()
@@ -160,12 +154,21 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 
                 if lvl == 'Komponen':
                     current_komp = uraian
-                    component_summary[current_komp] = pagu
+                    if current_komp not in component_summary or pagu > 0:
+                        component_summary[current_komp] = pagu
                 elif lvl == 'Sub Komponen':
-                    if current_komp not in sub_component_summary:
-                        sub_component_summary[current_komp] = {}
-                    sub_component_summary[current_komp][uraian] = pagu
+                    if current_komp:
+                        if current_komp not in sub_component_summary:
+                            sub_component_summary[current_komp] = {}
+                        sub_component_summary[current_komp][uraian] = pagu
 
+        if is_outstanding_file:
+            satker_row = df_lra[df_lra['Level'].astype(str).str.strip() == 'Satker']
+            if not satker_row.empty:
+                satker_summary["pagu"] = float(satker_row['Pagu'].values[0] or 0)
+                satker_summary["realisasi"] = float(satker_row['Total Realisasi'].values[0] or 0)
+                satker_summary["sisa"] = float(satker_row['Sisa'].values[0] or 0)
+            
             detail_rows = df_lra[df_lra['Level'].astype(str).str.strip() == 'Detail']
             gup_sum = pd.to_numeric(detail_rows['GUP'], errors='coerce').fillna(0).sum()
             spm_sum = pd.to_numeric(detail_rows['SPM'], errors='coerce').fillna(0).sum()
@@ -434,7 +437,6 @@ if file_rab and file_lra_list:
                 st.markdown("### 🥧 Rincian Proporsi per Sub Komponen")
                 
                 if component_summary:
-                    # Pilih Komponen untuk melihat Sub Komponennya
                     selected_komp_pie = st.selectbox("Pilih Komponen:", options=list(component_summary.keys()))
                     
                     if selected_komp_pie in sub_component_summary and sub_component_summary[selected_komp_pie]:
@@ -461,7 +463,6 @@ if file_rab and file_lra_list:
                             )
                             ax.axis('equal')
                             
-                            # Legend Sub Komponen di Samping
                             ax.legend(
                                 wedges, 
                                 sub_labels, 

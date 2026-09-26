@@ -451,7 +451,7 @@ if file_rab and file_lra_list:
 
             st.markdown("---")
             
-            # TAMPILAN GRAFIK BULANAN DENGAN ANGKA UTUH DI ATAS BATANG
+            # TAMPILAN GRAFIK BULANAN
             st.markdown("### 📊 Tren Penyerapan Bulanan")
             
             df_monthly_chart = pd.DataFrame({
@@ -490,10 +490,9 @@ if file_rab and file_lra_list:
             st.markdown("---")
             st.markdown("### 📋 Rincian Proporsi Total Realisasi Sub Komponen per Komponen")
             
-            # Palet warna yang digunakan oleh Plotly untuk diagram donat
-            chart_colors = px.colors.qualitative.Bold
+            # Palet warna konsisten
+            chart_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2']
             
-            # TAMPILKAN 2 KOLOM: DONUT CHART & TABEL KETERANGAN DENGAN INDIKATOR WARNA KUSTOM
             if sub_component_realisasi:
                 komp_keys = list(sub_component_realisasi.keys())
                 sub_cols = st.columns(2)
@@ -507,7 +506,7 @@ if file_rab and file_lra_list:
                         total_komp_val = sum(sub_values)
                         
                         if total_komp_val > 0:
-                            # 1. Grafik Donut Ringkas dengan palet warna konsisten
+                            # 1. Grafik Donut Ringkas
                             fig_donut = go.Figure(data=[go.Pie(
                                 labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels],
                                 values=sub_values,
@@ -526,37 +525,38 @@ if file_rab and file_lra_list:
                             )
                             st.plotly_chart(fig_donut, use_container_width=True)
                             
-                            # 2. Tabel HTML Kustom dengan Indikator Kotak Warna yang Selaras
-                            html_table = f"""
-                            <div style="overflow-x:auto; margin-bottom: 20px;">
-                            <table style="width:100%; border-collapse: collapse; font-family: sans-serif; font-size: 12px; background-color: #ffffff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                            # 2. Tabel Rincian Data HTML Aman & Rapi
+                            table_html = """
+                            <table style="width:100%; border-collapse: collapse; font-family: sans-serif; font-size: 13px; background-color: #ffffff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px;">
                               <thead>
-                                <tr style="background-color: #f8f9fa; border-bottom: 2px solid #e9ecef; text-align: left; color: #333;">
-                                  <th style="padding: 10px; border-top-left-radius: 6px;">Sub Komponen</th>
+                                <tr style="background-color: #f8f9fa; border-bottom: 2px solid #dee2e6; text-align: left; color: #333;">
+                                  <th style="padding: 10px;">Sub Komponen</th>
                                   <th style="padding: 10px; text-align: right;">Total Realisasi (Rp)</th>
-                                  <th style="padding: 10px; text-align: right; border-top-right-radius: 6px;">Persentase</th>
+                                  <th style="padding: 10px; text-align: right;">Persentase</th>
                                 </tr>
                               </thead>
                               <tbody>
                             """
                             
                             for i, (label, val) in enumerate(zip(sub_labels, sub_values)):
-                                color_code = chart_colors[i % len(chart_colors)]
+                                color_hex = chart_colors[i % len(chart_colors)]
                                 pct = (val / total_komp_val) * 100
-                                html_table += f"""
+                                table_html += f"""
                                 <tr style="border-bottom: 1px solid #f1f3f5;">
-                                  <td style="padding: 9px; color: #212529;"><span style="color: {color_code}; font-size: 16px; margin-right: 8px; vertical-align: middle;">■</span> {label}</td>
-                                  <td style="padding: 9px; text-align: right; font-weight: 500; color: #212529;">Rp {val:,.0f}</td>
-                                  <td style="padding: 9px; text-align: right; font-weight: 600; color: #495057;">{pct:.2f}%</td>
+                                  <td style="padding: 10px; color: #212529;">
+                                    <span style="display: inline-block; width: 12px; height: 12px; background-color: {color_hex}; margin-right: 8px; border-radius: 2px; vertical-align: middle;"></span>
+                                    {label}
+                                  </td>
+                                  <td style="padding: 10px; text-align: right; font-weight: 500; color: #212529;">Rp {val:,.0f}</td>
+                                  <td style="padding: 10px; text-align: right; font-weight: 600; color: #495057;">{pct:.2f}%</td>
                                 </tr>
                                 """
                             
-                            html_table += """
+                            table_html += """
                               </tbody>
                             </table>
-                            </div>
                             """
-                            st.markdown(html_table, unsafe_allow_html=True)
+                            st.markdown(table_html, unsafe_allow_html=True)
                         else:
                             st.info("Belum ada realisasi anggaran pada komponen ini.")
             else:

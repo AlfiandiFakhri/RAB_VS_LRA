@@ -48,17 +48,16 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
     data_realisasi = {}
     
     for uploaded_lra in file_lra_list:
-        # 1. Deteksi Identitas File 
         df_raw = pd.read_excel(uploaded_lra, header=None, nrows=15)
         bulan_file = None
         is_outstanding_file = False
         
-        # Lapis 1: Cek dari NAMA FILE
+        # Cek dari NAMA FILE
         fname_upper = uploaded_lra.name.upper().replace(" ", "")
         if "SEMUALEVEL" in fname_upper or "ALLPERIODE" in fname_upper or "SEMUAPERIODE" in fname_upper:
             is_outstanding_file = True
 
-        # Lapis 2: Cek dari ISI FILE (Baris 1-15) mencari teks header
+        # Cek dari ISI FILE
         for r in range(len(df_raw)):
             row_text_raw = " ".join(str(val) for val in df_raw.iloc[r].values if pd.notna(val)).upper()
             row_text_clean = row_text_raw.replace(" ", "")
@@ -71,17 +70,15 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                     bulan_file = b
                     break
                     
-        # Jika bulan belum ketemu di dalam isi file, cek di nama filenya
         if not bulan_file:
             for b in list_semua_bulan:
                 if b in uploaded_lra.name.upper():
                     bulan_file = b
                     break
                     
-        # BACA DATA LRA SEBENARNYA (Mulai Baris ke-6 / skiprows=5)
         df_lra = pd.read_excel(uploaded_lra, skiprows=5)
         
-        # Lapis 3: Failsafe (Kecerdasan Buatan Tambahan)
+        # Failsafe Lapis 3
         kolom_lra = [str(col).upper() for col in df_lra.columns]
         ada_gup = any('GUP' in col for col in kolom_lra)
         ada_spm = any('SPM' in col for col in kolom_lra)
@@ -89,7 +86,6 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
         if not bulan_file and (ada_gup and ada_spm):
             is_outstanding_file = True
         
-        # Lewati jika benar-benar file random (bukan bulanan dan bukan outstanding)
         if not bulan_file and not is_outstanding_file:
             continue
             
@@ -99,16 +95,13 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
             lvl = str(row.get('Level')).strip()
             uraian = str(row.get('Kode / Uraian', '')).strip()
             
-            # === AMBIL REALISASI BULANAN ===
             realisasi = row.get('Total Realisasi', 0)
             try: realisasi = float(realisasi)
             except: realisasi = 0
             if pd.isna(realisasi): realisasi = 0
                 
-            # === AMBIL NILAI OUTSTANDING (GUP + SPM + VERIFIKASI) ===
             outstanding_val = 0
             if is_outstanding_file:
-                # Mengambil dari 3 kolom yang terpisah
                 val_gup = row.get('GUP', 0)
                 val_spm = row.get('SPM', 0)
                 val_verifikasi = row.get('Verifikasi', 0)
@@ -150,6 +143,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                     data_realisasi[kamar_unik][norm_lra] = {b: 0 for b in list_semua_bulan}
                     data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] = 0
                 
+                # Jika file bulanan, simpan ke bulannya. Nilainya nanti di-SUM.
                 if bulan_file:
                     data_realisasi[kamar_unik][norm_lra][bulan_file] += realisasi
                 
@@ -247,8 +241,6 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
                 dict_bulanan = data_realisasi[kamar_ketemu].pop(key_ketemu) 
                 nilai_outstanding = dict_bulanan.pop('OUTSTANDING', 0)
                 
-                total_realisasi_val = sum(dict_bulanan.values())
-                
                 target_row = row_idx
                 for r_cek in range(row_idx, min(row_idx + 6, max_row + 1)):
                     val_s = ws.cell(row=r_cek, column=19).value
@@ -258,22 +250,26 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
                 
                 baris_terpakai.add(target_row)
                 
-                cell_realisasi = ws.cell(row=target_row, column=20)   
-                cell_sisa = ws.cell(row=target_row, column=21)        
-                cell_outstanding = ws.cell(row=target_row, column=22) 
+                cell_realisasi = ws.cell(row=target_row, column=20)   # Kolom T (TOTAL Realisasi)
+                cell_sisa = ws.cell(row=target_row, column=21)        # Kolom U (SISA)
+                cell_outstanding = ws.cell(row=target_row, column=22) # Kolom V (OUT STANDING)
                 
-                cell_realisasi.value = total_realisasi_val
+                # 1. Masukkan nilai OUT STANDING
                 cell_outstanding.value = nilai_outstanding
                 
-                # =========================================================================
-                # REVISI RUMUS: SISA = Pagu(S) - Total Realisasi(T) - Out Standing(V)
-                # =========================================================================
-                cell_sisa.value = f"=S{target_row}-T{target_row}-V{target_row}"
-                
+                # 2. Masukkan nilai Bulanan (W = Jan s/d AH = Des)
                 for idx_b, b_name in enumerate(list_semua_bulan):
                     col_target_bulan = 23 + idx_b 
                     cell_bulan = ws.cell(row=target_row, column=col_target_bulan)
                     cell_bulan.value = dict_bulanan[b_name]
+                
+                # =========================================================================
+                # 3. PERBAIKAN RUMUS OTOMATIS EXCEL
+                # TOTAL REALISASI (T) = SUM(Jan:Des) + OUT STANDING(V)
+                # SISA (U)            = PAGU(S) - TOTAL REALISASI(T)
+                # =========================================================================
+                cell_realisasi.value = f"=SUM(W{target_row}:AH{target_row})+V{target_row}"
+                cell_sisa.value = f"=S{target_row}-T{target_row}"
 
                 data_ref = ws.cell(row=target_row, column=19)
                 

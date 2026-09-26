@@ -9,6 +9,7 @@ from copy import copy
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
+import textwrap
 
 # Pengaman untuk Library PowerPoint
 try:
@@ -525,23 +526,12 @@ if file_rab and file_lra_list:
                             )
                             st.plotly_chart(fig_donut, use_container_width=True)
                             
-                            # 2. Tabel Rincian Data HTML Aman & Rapi
-                            table_html = """
-                            <table style="width:100%; border-collapse: collapse; font-family: sans-serif; font-size: 13px; background-color: #ffffff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px;">
-                              <thead>
-                                <tr style="background-color: #f8f9fa; border-bottom: 2px solid #dee2e6; text-align: left; color: #333;">
-                                  <th style="padding: 10px;">Sub Komponen</th>
-                                  <th style="padding: 10px; text-align: right;">Total Realisasi (Rp)</th>
-                                  <th style="padding: 10px; text-align: right;">Persentase</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                            """
-                            
+                            # 2. Tabel Rincian Data HTML (Menggunakan textwrap.dedent agar tidak dianggap code block oleh Markdown)
+                            rows_html = ""
                             for i, (label, val) in enumerate(zip(sub_labels, sub_values)):
                                 color_hex = chart_colors[i % len(chart_colors)]
                                 pct = (val / total_komp_val) * 100
-                                table_html += f"""
+                                rows_html += f"""
                                 <tr style="border-bottom: 1px solid #f1f3f5;">
                                   <td style="padding: 10px; color: #212529;">
                                     <span style="display: inline-block; width: 12px; height: 12px; background-color: {color_hex}; margin-right: 8px; border-radius: 2px; vertical-align: middle;"></span>
@@ -551,11 +541,21 @@ if file_rab and file_lra_list:
                                   <td style="padding: 10px; text-align: right; font-weight: 600; color: #495057;">{pct:.2f}%</td>
                                 </tr>
                                 """
-                            
-                            table_html += """
+
+                            table_html = textwrap.dedent(f"""
+                            <table style="width:100%; border-collapse: collapse; font-family: sans-serif; font-size: 13px; background-color: #ffffff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px;">
+                              <thead>
+                                <tr style="background-color: #f8f9fa; border-bottom: 2px solid #dee2e6; text-align: left; color: #333;">
+                                  <th style="padding: 10px;">Sub Komponen</th>
+                                  <th style="padding: 10px; text-align: right;">Total Realisasi (Rp)</th>
+                                  <th style="padding: 10px; text-align: right;">Persentase</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rows_html}
                               </tbody>
                             </table>
-                            """
+                            """)
                             st.markdown(table_html, unsafe_allow_html=True)
                         else:
                             st.info("Belum ada realisasi anggaran pada komponen ini.")

@@ -48,10 +48,10 @@ with col2:
 
 if file_rab and file_lra:
     if st.button("🚀 Proses & Buat Laporan", type="primary"):
-        with st.spinner("Memproses sistem booking baris..."):
+        with st.spinner("Memproses sistem booking baris dan data bulanan..."):
             try:
                 # ==========================================
-                # 1. BACA LRA
+                # 1. BACA LRA (Dengan Data Per Bulan)
                 # ==========================================
                 df_lra = pd.read_excel(file_lra, skiprows=5)
                 data_realisasi = {}
@@ -60,12 +60,15 @@ if file_rab and file_lra:
                 cur_sub = "GLOBAL"
                 cur_akun = "GLOBAL"
                 
+                # Daftar nama kolom bulan di LRA (sesuaikan jika nama kolom di Excel LRA berbeda, misal "Jan", "Januari", dll.)
+                # Di sini diasumsikan menggunakan nama lengkap atau singkatan standar bulan
+                list_bulan_lra = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 
+                                  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']
+                
                 for index, row in df_lra.iterrows():
                     lvl = str(row.get('Level')).strip()
                     uraian = str(row.get('Kode / Uraian', '')).strip()
-                    realisasi = row.get('Total Realisasi', 0)
-                    if pd.isna(realisasi): realisasi = 0
-                        
+                    
                     if lvl == 'Komponen':
                         match = re.search(r'(\d{3})\s*-', uraian)
                         if match: cur_komp = match.group(1)
@@ -84,9 +87,31 @@ if file_rab and file_lra:
                         
                     if pd.notna(uraian) and uraian != 'nan' and uraian != '':
                         norm_lra = normalize_text(uraian)
+                        
+                        # Ambil nilai per bulan dari baris LRA
+                        val_bulanan = {}
+                        for b in list_bulan_lra:
+                            # Cek variasi nama kolom (misal: "Jan", "JAN", "Januari")
+                            val = None
+                            for col_name in df_lra.columns:
+                                if b.lower() in str(col_name).lower():
+                                    val = row.get(col_name, 0)
+                                    break
+                            if val is None or pd.isna(val): 
+                                val = 0
+                            val_bulanan[b] = val
+
+                        # Hitung Total Realisasi dari penjumlahan bulan-bulan jika diperlukan
+                        total_realisasi_val = sum(val_bulanan.values())
+                        
                         if norm_lra not in data_realisasi[kamar_unik]:
                             data_realisasi[kamar_unik][norm_lra] = []
-                        data_realisasi[kamar_unik][norm_lra].append(realisasi)
+                        
+                        # Simpan data bulanan beserta totalnya
+                        data_realisasi[kamar_unik][norm_lra].append({
+                            'total': total_realisasi_val,
+                            'bulanan': val_bulanan
+                        })
 
                 # ==========================================
                 # 2. BACA & MODIFIKASI RAB 
@@ -97,7 +122,6 @@ if file_rab and file_lra:
                 baris_header = 13 
                 baris_mulai_data = 14
                 
-                # URAIAN BULAN DIUBAH MENJADI NAMA LENGKAP
                 kolom_baru = [
                     "TOTAL Realisasi", "SISA", 
                     "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", 
@@ -125,7 +149,6 @@ if file_rab and file_lra:
 
                 ws.column_dimensions[get_column_letter(20)].width = 20.5
                 ws.column_dimensions[get_column_letter(21)].width = 18.2
-                # Lebar kolom bulan (22 sampai 33) disesuaikan agar nama bulan yang panjang muat dengan baik
                 for c_idx in range(22, 34): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0
                 ws.column_dimensions[get_column_letter(34)].width = 35.0
 
@@ -136,7 +159,6 @@ if file_rab and file_lra:
                 rab_sub = "GLOBAL"
                 rab_akun = "GLOBAL"
                 
-                # LIST BARIS YANG SUDAH TERPAKAI (Di-booking)
                 baris_terpakai = set()
 
                 for row_idx in range(baris_mulai_data, max_row + 1):
@@ -178,30 +200,39 @@ if file_rab and file_lra:
                         
                         if matched_key:
                             kamar_ketemu, key_ketemu = matched_key
-                            nilai_realisasi = data_realisasi[kamar_ketemu][key_ketemu].pop(0)
+                            data_item = data_realisasi[kamar_ketemu][key_ketemu].pop(0)
                             
-                            # ============================================================
-                            # SISTEM BOOKING BARIS: Cari baris berangka S yang belum dipakai
-                            # ============================================================
+                            nilai_realisasi = data_item['total']
+                            dict_bulanan = data_item['bulanan']
+                            
+                            # Cari baris target menggunakan Sistem Booking
                             target_row = row_idx
                             for r_cek in range(row_idx, min(row_idx + 6, max_row + 1)):
                                 val_s = ws.cell(row=r_cek, column=19).value
-                                # Jika baris S ada isinya DAN baris ini belum diklaim baris lain
                                 if val_s is not None and r_cek not in baris_terpakai:
                                     target_row = r_cek
                                     break
                             
-                            baris_terpakai.add(target_row) # Booking baris ini!
-                            # ============================================================
+                            baris_terpakai.add(target_row)
                             
+                            # Tulis Total Realisasi & Sisa
                             cell_realisasi = ws.cell(row=target_row, column=20)
                             cell_sisa = ws.cell(row=target_row, column=21)
                             
                             cell_realisasi.value = nilai_realisasi
                             cell_sisa.value = f"=S{target_row}-T{target_row}"
                             
+                            # Tulis Data Per Bulan ke Kolom masing-masing (Kolom 22 sampai 33)
+                            # Urutan kolom: Kolom 22 = Januari, Kolom 23 = Februari, dst.
+                            for idx_b, b_name in enumerate(list_bulan_lra):
+                                col_target_bulan = 22 + idx_b
+                                cell_bulan = ws.cell(row=target_row, column=col_target_bulan)
+                                cell_bulan.value = dict_bulanan[b_name]
+
                             data_ref = ws.cell(row=target_row, column=19)
-                            for c in [cell_realisasi, cell_sisa]:
+                            # Terapkan format style ke semua kolom dari Total sampai Desember
+                            for c_idx in range(20, 34):
+                                c = ws.cell(row=target_row, column=c_idx)
                                 if data_ref.has_style:
                                     c.font = copy(data_ref.font)
                                     c.border = copy(data_ref.border)
@@ -214,7 +245,7 @@ if file_rab and file_lra:
                 wb.save(output)
                 output.seek(0)
                 
-                st.success(f"🎉 SUKSES! Berhasil menyelaraskan {data_ditemukan} baris menggunakan Sistem Booking.")
+                st.success(f"🎉 SUKSES! Berhasil menyelaraskan {data_ditemukan} baris beserta rincian bulanan.")
                 
                 st.download_button(
                     label="⬇️ Download Laporan Akhir (.xlsx)",

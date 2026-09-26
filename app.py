@@ -9,7 +9,6 @@ from copy import copy
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
-import textwrap
 
 # Pengaman untuk Library PowerPoint
 try:
@@ -507,14 +506,14 @@ if file_rab and file_lra_list:
                         total_komp_val = sum(sub_values)
                         
                         if total_komp_val > 0:
-                            # 1. Grafik Donut Ringkas
+                            # 1. Grafik Donut Ringkas dan Jelas
                             fig_donut = go.Figure(data=[go.Pie(
                                 labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels],
                                 values=sub_values,
-                                hole=0.4,
-                                textinfo='percent',
+                                hole=0.45,
+                                textinfo='percent+label',
                                 hoverinfo='label+value+percent',
-                                textfont_size=12,
+                                textfont_size=11,
                                 marker=dict(colors=chart_colors[:len(sub_labels)], line=dict(color='#FFFFFF', width=2))
                             )])
                             fig_donut.update_layout(
@@ -522,41 +521,17 @@ if file_rab and file_lra_list:
                                 paper_bgcolor="rgba(0,0,0,0)",
                                 margin=dict(t=20, b=20, l=20, r=20),
                                 showlegend=False,
-                                height=280
+                                height=300
                             )
                             st.plotly_chart(fig_donut, use_container_width=True)
                             
-                            # 2. Tabel Rincian Data HTML (Menggunakan textwrap.dedent agar tidak dianggap code block oleh Markdown)
-                            rows_html = ""
-                            for i, (label, val) in enumerate(zip(sub_labels, sub_values)):
-                                color_hex = chart_colors[i % len(chart_colors)]
-                                pct = (val / total_komp_val) * 100
-                                rows_html += f"""
-                                <tr style="border-bottom: 1px solid #f1f3f5;">
-                                  <td style="padding: 10px; color: #212529;">
-                                    <span style="display: inline-block; width: 12px; height: 12px; background-color: {color_hex}; margin-right: 8px; border-radius: 2px; vertical-align: middle;"></span>
-                                    {label}
-                                  </td>
-                                  <td style="padding: 10px; text-align: right; font-weight: 500; color: #212529;">Rp {val:,.0f}</td>
-                                  <td style="padding: 10px; text-align: right; font-weight: 600; color: #495057;">{pct:.2f}%</td>
-                                </tr>
-                                """
-
-                            table_html = textwrap.dedent(f"""
-                            <table style="width:100%; border-collapse: collapse; font-family: sans-serif; font-size: 13px; background-color: #ffffff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px;">
-                              <thead>
-                                <tr style="background-color: #f8f9fa; border-bottom: 2px solid #dee2e6; text-align: left; color: #333;">
-                                  <th style="padding: 10px;">Sub Komponen</th>
-                                  <th style="padding: 10px; text-align: right;">Total Realisasi (Rp)</th>
-                                  <th style="padding: 10px; text-align: right;">Persentase</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {rows_html}
-                              </tbody>
-                            </table>
-                            """)
-                            st.markdown(table_html, unsafe_allow_html=True)
+                            # 2. Tabel Rincian Data Menggunakan Komponen Native Streamlit (100% Aman & Tanpa Error HTML)
+                            df_sub_table = pd.DataFrame({
+                                "Sub Komponen": sub_labels,
+                                "Total Realisasi (Rp)": [f"Rp {v:,.0f}" for v in sub_values],
+                                "Persentase": [f"{(v / total_komp_val * 100):.2f}%" for v in sub_values]
+                            })
+                            st.dataframe(df_sub_table, use_container_width=True, hide_index=True)
                         else:
                             st.info("Belum ada realisasi anggaran pada komponen ini.")
             else:

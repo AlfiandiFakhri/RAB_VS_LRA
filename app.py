@@ -421,7 +421,6 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
     p_h2.font.bold = True
     p_h2.font.color.rgb = RGBColor(24, 43, 73)
     
-    # Kotak Metrik Utama di Slide 2
     total_pagu = satker_summary["pagu"]
     total_realisasi = satker_summary["realisasi"]
     total_sisa = satker_summary["sisa"]
@@ -456,7 +455,6 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
     p_h3.font.bold = True
     p_h3.font.color.rgb = RGBColor(24, 43, 73)
     
-    # Buat grafik matplotlib untuk disisipkan ke PPTX
     fig_m, ax_m = plt.subplots(figsize=(10, 4.5))
     months = list(monthly_totals.keys())
     values = list(monthly_totals.values())
@@ -486,7 +484,6 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
             p_hs.font.bold = True
             p_hs.font.color.rgb = RGBColor(24, 43, 73)
             
-            # Buat chart Pie matplotlib
             sub_labels = list(sub_dict.keys())
             sub_vals = list(sub_dict.values())
             total_komp = sum(sub_vals)
@@ -509,7 +506,6 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
             
             slide_sub.shapes.add_picture(pie_buf, Inches(0.8), Inches(1.5), width=Inches(5.0))
             
-            # Tambahkan Tabel Rincian di Samping Kanan
             rows = len(sub_dict) + 1
             cols = 3
             left = Inches(6.2)
@@ -588,14 +584,12 @@ if file_rab and file_lra_list:
             total_sisa_all = satker_summary["sisa"]
             persen_nasional = (total_realisasi_incl_out / total_pagu_all * 100) if total_pagu_all > 0 else 0
 
-            # Kartu Metrik Utama Nasional
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("💰 Total Pagu Anggaran", f"Rp {total_pagu_all:,.0f}")
             m2.metric("📉 Total Realisasi", f"Rp {total_realisasi_incl_out:,.0f}")
             m3.metric("🟡 Sisa Anggaran", f"Rp {total_sisa_all:,.0f}")
             m4.metric("📊 Tingkat Penyerapan", f"{persen_nasional:.2f}%")
 
-            # --- KARTU METRIK PER 2 KOMPONEN UTAMA (KIRI & KANAN) ---
             if component_metrics:
                 st.markdown("---")
                 st.markdown("### 🏷️ Ringkasan Per Komponen")
@@ -611,8 +605,6 @@ if file_rab and file_lra_list:
                         sub_c2.metric("Penyerapan", f"{metrics['persen']:.2f}%")
 
             st.markdown("---")
-            
-            # TAMPILAN GRAFIK BULANAN
             st.markdown("### 📊 Tren Penyerapan Bulanan")
             
             df_monthly_chart = pd.DataFrame({
@@ -651,7 +643,6 @@ if file_rab and file_lra_list:
             st.markdown("---")
             st.markdown("### 📋 Rincian Proporsi Total Realisasi Sub Komponen per Komponen")
             
-            # Palet warna konsisten
             chart_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2']
             
             if sub_component_realisasi:
@@ -667,7 +658,6 @@ if file_rab and file_lra_list:
                         total_komp_val = sum(sub_values)
                         
                         if total_komp_val > 0:
-                            # 1. Grafik Donut (Tanpa Hover)
                             fig_donut = go.Figure(data=[go.Pie(
                                 labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels],
                                 values=sub_values,
@@ -686,7 +676,6 @@ if file_rab and file_lra_list:
                             )
                             st.plotly_chart(fig_donut, use_container_width=True)
                             
-                            # 2. Header Tabel Keterangan & Indikator Warna
                             head_c = st.columns([0.5, 4.5, 2.5, 2])
                             with head_c[0]: st.markdown("")
                             with head_c[1]: st.markdown("**Sub Komponen**")
@@ -694,7 +683,6 @@ if file_rab and file_lra_list:
                             with head_c[3]: st.markdown("**Persentase**")
                             st.markdown("<hr style='margin: 4px 0px 8px 0px;'>", unsafe_allow_html=True)
 
-                            # 3. Baris Data dengan Indikator Kotak Warna
                             for i, (label, val) in enumerate(zip(sub_labels, sub_values)):
                                 color_hex = chart_colors[i % len(chart_colors)]
                                 pct = (val / total_komp_val) * 100

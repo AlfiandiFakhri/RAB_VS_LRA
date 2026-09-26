@@ -9,11 +9,14 @@ from copy import copy
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
+import matplotlib.pyplot as plt
 
 # Pengaman untuk Library PowerPoint
 try:
     from pptx import Presentation
     from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
     HAS_PPTX = True
 except ImportError:
     HAS_PPTX = False
@@ -381,6 +384,161 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     return output, data_ditemukan, pd.DataFrame(summary_preview)
 
 # ==========================================
+# FUNGSI PEMBUATAN FILE POWERPOINT (PPTX)
+# ==========================================
+def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, sub_component_realisasi):
+    prs = Presentation()
+    prs.slide_width = Inches(13.333)
+    prs.slide_height = Inches(7.5)
+    blank_layout = prs.slide_layouts[6]
+    
+    # 1. Slide Judul (Cover)
+    slide1 = prs.slides.add_slide(blank_layout)
+    title_box = slide1.shapes.add_textbox(Inches(1), Inches(2.2), Inches(11.333), Inches(3))
+    tf1 = title_box.text_frame
+    tf1.word_wrap = True
+    
+    p1 = tf1.paragraphs[0]
+    p1.text = "LAPORAN EKSEKUTIF KONSOLIDASI ANGGARAN"
+    p1.font.size = Pt(32)
+    p1.font.bold = True
+    p1.font.color.rgb = RGBColor(24, 43, 73)
+    p1.alignment = PP_ALIGN.CENTER
+    
+    p2 = tf1.add_paragraph()
+    p2.text = "RAB vs LRA (Kementerian Koperasi dan UKM)"
+    p2.font.size = Pt(20)
+    p2.font.color.rgb = RGBColor(100, 110, 120)
+    p2.alignment = PP_ALIGN.CENTER
+    
+    # 2. Slide Ringkasan Eksekutif Nasional & Komponen
+    slide2 = prs.slides.add_slide(blank_layout)
+    t_box2 = slide2.shapes.add_textbox(Inches(0.8), Inches(0.5), Inches(11.7), Inches(0.8))
+    tf2 = t_box2.text_frame
+    p_h2 = tf2.paragraphs[0]
+    p_h2.text = "Ringkasan Eksekutif & Kinerja Anggaran"
+    p_h2.font.size = Pt(24)
+    p_h2.font.bold = True
+    p_h2.font.color.rgb = RGBColor(24, 43, 73)
+    
+    # Kotak Metrik Utama di Slide 2
+    total_pagu = satker_summary["pagu"]
+    total_realisasi = satker_summary["realisasi"]
+    total_sisa = satker_summary["sisa"]
+    persen_nasional = (total_realisasi / total_pagu * 100) if total_pagu > 0 else 0
+    
+    metrics_text = (
+        f"• Total Pagu Anggaran : Rp {total_pagu:,.0f}\n"
+        f"• Total Realisasi     : Rp {total_realisasi:,.0f}\n"
+        f"• Sisa Anggaran       : Rp {total_sisa:,.0f}\n"
+        f"• Tingkat Penyerapan  : {persen_nasional:.2f}%\n\n"
+    )
+    if component_metrics:
+        metrics_text += "Detail per Komponen Utama:\n"
+        for komp_name, m in component_metrics.items():
+            metrics_text += f" - {komp_name} | Pagu: Rp {m['pagu']:,.0f} | Realisasi: Rp {m['realisasi']:,.0f} ({m['persen']:.2f}%)\n"
+            
+    m_box = slide2.shapes.add_textbox(Inches(0.8), Inches(1.5), Inches(11.7), Inches(5))
+    mtf = m_box.text_frame
+    mtf.word_wrap = True
+    mp = mtf.paragraphs[0]
+    mp.text = metrics_text
+    mp.font.size = Pt(16)
+    mp.font.color.rgb = RGBColor(40, 40, 40)
+    
+    # 3. Slide Grafik Tren Bulanan
+    slide3 = prs.slides.add_slide(blank_layout)
+    t_box3 = slide3.shapes.add_textbox(Inches(0.8), Inches(0.5), Inches(11.7), Inches(0.8))
+    tf3 = t_box3.text_frame
+    p_h3 = tf3.paragraphs[0]
+    p_h3.text = "Grafik Tren Penyerapan Anggaran Bulanan"
+    p_h3.font.size = Pt(24)
+    p_h3.font.bold = True
+    p_h3.font.color.rgb = RGBColor(24, 43, 73)
+    
+    # Buat grafik matplotlib untuk disisipkan ke PPTX
+    fig_m, ax_m = plt.subplots(figsize=(10, 4.5))
+    months = list(monthly_totals.keys())
+    values = list(monthly_totals.values())
+    bars = ax_m.bar(months, [v / 1e9 for v in values], color='#2a9d8f')
+    ax_m.set_ylabel('Realisasi (Miliar Rp)', fontsize=11, fontweight='bold')
+    ax_m.set_title('Akumulasi Realisasi Anggaran per Bulan', fontsize=13, fontweight='bold', pad=15)
+    plt.xticks(rotation=35, ha='right', fontsize=10)
+    ax_m.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    
+    img_buf = io.BytesIO()
+    fig_m.savefig(img_buf, format='png', dpi=200, bbox_inches='tight')
+    plt.close(fig_m)
+    img_buf.seek(0)
+    
+    slide3.shapes.add_picture(img_buf, Inches(0.8), Inches(1.5), width=Inches(11.7))
+    
+    # 4. Slide Rincian Sub Komponen (Pie Chart & Tabel)
+    if sub_component_realisasi:
+        for komp_name, sub_dict in sub_component_realisasi.items():
+            slide_sub = prs.slides.add_slide(blank_layout)
+            t_box_sub = slide_sub.shapes.add_textbox(Inches(0.8), Inches(0.4), Inches(11.7), Inches(0.8))
+            tf_sub = t_box_sub.text_frame
+            p_hs = tf_sub.paragraphs[0]
+            p_hs.text = f"Proporsi & Rincian Sub Komponen: {komp_name}"
+            p_hs.font.size = Pt(22)
+            p_hs.font.bold = True
+            p_hs.font.color.rgb = RGBColor(24, 43, 73)
+            
+            # Buat chart Pie matplotlib
+            sub_labels = list(sub_dict.keys())
+            sub_vals = list(sub_dict.values())
+            total_komp = sum(sub_vals)
+            
+            fig_p, ax_p = plt.subplots(figsize=(5.5, 4.5))
+            ax_p.pie(
+                sub_vals, 
+                labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels], 
+                autopct='%1.1f%%', 
+                startangle=90, 
+                colors=plt.cm.Paired.colors
+            )
+            ax_p.axis('equal')
+            plt.tight_layout()
+            
+            pie_buf = io.BytesIO()
+            fig_p.savefig(pie_buf, format='png', dpi=200, bbox_inches='tight')
+            plt.close(fig_p)
+            pie_buf.seek(0)
+            
+            slide_sub.shapes.add_picture(pie_buf, Inches(0.8), Inches(1.5), width=Inches(5.0))
+            
+            # Tambahkan Tabel Rincian di Samping Kanan
+            rows = len(sub_dict) + 1
+            cols = 3
+            left = Inches(6.2)
+            top = Inches(1.8)
+            width = Inches(6.3)
+            height = Inches(0.5 * rows)
+            
+            table_shape = slide_sub.shapes.add_table(rows, cols, left, top, width, height)
+            table = table_shape.table
+            table.columns[0].width = Inches(2.3)
+            table.columns[1].width = Inches(2.3)
+            table.columns[2].width = Inches(1.7)
+            
+            table.cell(0, 0).text = "Sub Komponen"
+            table.cell(0, 1).text = "Total Realisasi (Rp)"
+            table.cell(0, 2).text = "Persentase"
+            
+            for r_idx, (lbl, val) in enumerate(zip(sub_labels, sub_vals), start=1):
+                pct = (val / total_komp * 100) if total_komp > 0 else 0
+                table.cell(r_idx, 0).text = lbl
+                table.cell(r_idx, 1).text = f"Rp {val:,.0f}"
+                table.cell(r_idx, 2).text = f"{pct:.2f}%"
+                
+    ppt_output = io.BytesIO()
+    prs.save(ppt_output)
+    ppt_output.seek(0)
+    return ppt_output
+
+# ==========================================
 # ANTARMUKA PENGGUNA (UI)
 # ==========================================
 st.title("📊 EXECUTIVE RAB VS LRA GENERATOR")
@@ -411,6 +569,9 @@ if file_rab and file_lra_list:
                 
                 st.write("Menyelaraskan dan memodifikasi template RAB...")
                 output_excel, data_ditemukan, df_preview = process_rab_lra(file_rab, data_realisasi, list_semua_bulan)
+                
+                st.write("Menyiapkan dokumen presentasi PowerPoint (.pptx)...")
+                ppt_output = create_powerpoint_report(satker_summary, component_metrics, monthly_totals, sub_component_realisasi)
                 
                 status.update(label="Proses Selesai!", state="complete", expanded=False)
 
@@ -506,13 +667,13 @@ if file_rab and file_lra_list:
                         total_komp_val = sum(sub_values)
                         
                         if total_komp_val > 0:
-                            # 1. Grafik Donut (Tanpa Hover / Tanpa fitur kursor)
+                            # 1. Grafik Donut (Tanpa Hover)
                             fig_donut = go.Figure(data=[go.Pie(
                                 labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels],
                                 values=sub_values,
                                 hole=0.45,
                                 textinfo='percent+label',
-                                hoverinfo='none',  # Menghilangkan fitur melihat dengan kursor
+                                hoverinfo='none',
                                 textfont_size=11,
                                 marker=dict(colors=chart_colors[:len(sub_labels)], line=dict(color='#FFFFFF', width=2))
                             )])
@@ -525,7 +686,7 @@ if file_rab and file_lra_list:
                             )
                             st.plotly_chart(fig_donut, use_container_width=True)
                             
-                            # 2. Header Tabel Keterangan & Indikator Warna (Native Streamlit Columns)
+                            # 2. Header Tabel Keterangan & Indikator Warna
                             head_c = st.columns([0.5, 4.5, 2.5, 2])
                             with head_c[0]: st.markdown("")
                             with head_c[1]: st.markdown("**Sub Komponen**")
@@ -533,7 +694,7 @@ if file_rab and file_lra_list:
                             with head_c[3]: st.markdown("**Persentase**")
                             st.markdown("<hr style='margin: 4px 0px 8px 0px;'>", unsafe_allow_html=True)
 
-                            # 3. Baris Data dengan Indikator Kotak Warna yang Selaras
+                            # 3. Baris Data dengan Indikator Kotak Warna
                             for i, (label, val) in enumerate(zip(sub_labels, sub_values)):
                                 color_hex = chart_colors[i % len(chart_colors)]
                                 pct = (val / total_komp_val) * 100
@@ -553,15 +714,27 @@ if file_rab and file_lra_list:
                 st.info("Data realisasi sub komponen belum tersedia.")
 
             st.divider()
-            st.subheader("📥 Download Berkas Laporan Akhir")
-            st.download_button(
-                label="⬇️ Download Laporan Excel (.xlsx)",
-                data=output_excel,
-                file_name="LAPORAN_RAB_LRA_LENGKAP_JAN_DES.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary",
-                use_container_width=True
-            )
+            st.subheader("📥 Download Berkas Laporan & Presentasi")
+            
+            dl_col1, dl_col2 = st.columns(2)
+            with dl_col1:
+                st.download_button(
+                    label="⬇️ Download Laporan Excel (.xlsx)",
+                    data=output_excel,
+                    file_name="LAPORAN_RAB_LRA_LENGKAP_JAN_DES.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="primary",
+                    use_container_width=True
+                )
+            with dl_col2:
+                st.download_button(
+                    label="⬇️ Download Presentasi PowerPoint (.pptx)",
+                    data=ppt_output,
+                    file_name="PRESENTASI_EKSEKUTIF_ANGGARAN.pptx",
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    type="primary",
+                    use_container_width=True
+                )
 
         except Exception as e:
             st.error(f"⚠️ Terjadi kesalahan pada saat pemrosesan: {e}")

@@ -490,7 +490,10 @@ if file_rab and file_lra_list:
             st.markdown("---")
             st.markdown("### 📋 Rincian Proporsi Total Realisasi Sub Komponen per Komponen")
             
-            # TAMPILKAN 2 KOLOM: DIAGRAM PIE/DONUT RINGKAS & TABEL RINCIAN ANGKA LANGSUNG (TANPA PERLU HOVER)
+            # Palet warna yang digunakan oleh Plotly untuk diagram donat
+            chart_colors = px.colors.qualitative.Bold
+            
+            # TAMPILKAN 2 KOLOM: DONUT CHART & TABEL KETERANGAN DENGAN INDIKATOR WARNA KUSTOM
             if sub_component_realisasi:
                 komp_keys = list(sub_component_realisasi.keys())
                 sub_cols = st.columns(2)
@@ -501,34 +504,59 @@ if file_rab and file_lra_list:
                         sub_dict = sub_component_realisasi[komp_name]
                         sub_labels = list(sub_dict.keys())
                         sub_values = list(sub_dict.values())
+                        total_komp_val = sum(sub_values)
                         
-                        if sum(sub_values) > 0:
-                            # 1. Grafik Donut Ringkas (Tanpa legenda panjang yang menumpuk)
+                        if total_komp_val > 0:
+                            # 1. Grafik Donut Ringkas dengan palet warna konsisten
                             fig_donut = go.Figure(data=[go.Pie(
-                                labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels], # Singkat label di gambar
+                                labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels],
                                 values=sub_values,
                                 hole=0.4,
                                 textinfo='percent',
                                 hoverinfo='label+value+percent',
                                 textfont_size=12,
-                                marker=dict(colors=px.colors.qualitative.Bold, line=dict(color='#FFFFFF', width=2))
+                                marker=dict(colors=chart_colors[:len(sub_labels)], line=dict(color='#FFFFFF', width=2))
                             )])
                             fig_donut.update_layout(
                                 plot_bgcolor="rgba(0,0,0,0)",
                                 paper_bgcolor="rgba(0,0,0,0)",
                                 margin=dict(t=20, b=20, l=20, r=20),
-                                showlegend=False, # Sembunyikan legenda agar tidak memenuhi layar
-                                height=300
+                                showlegend=False,
+                                height=280
                             )
                             st.plotly_chart(fig_donut, use_container_width=True)
                             
-                            # 2. Tabel Rincian Data Langsung (Sangat mudah dibaca tanpa kursor)
-                            df_sub_table = pd.DataFrame({
-                                "Sub Komponen": sub_labels,
-                                "Total Realisasi (Rp)": [f"Rp {v:,.0f}" for v in sub_values],
-                                "Persentase": [f"{(v / sum(sub_values) * 100):.2f}%" for v in sub_values]
-                            })
-                            st.dataframe(df_sub_table, use_container_width=True, hide_index=True)
+                            # 2. Tabel HTML Kustom dengan Indikator Kotak Warna yang Selaras
+                            html_table = f"""
+                            <div style="overflow-x:auto; margin-bottom: 20px;">
+                            <table style="width:100%; border-collapse: collapse; font-family: sans-serif; font-size: 12px; background-color: #ffffff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                              <thead>
+                                <tr style="background-color: #f8f9fa; border-bottom: 2px solid #e9ecef; text-align: left; color: #333;">
+                                  <th style="padding: 10px; border-top-left-radius: 6px;">Sub Komponen</th>
+                                  <th style="padding: 10px; text-align: right;">Total Realisasi (Rp)</th>
+                                  <th style="padding: 10px; text-align: right; border-top-right-radius: 6px;">Persentase</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                            """
+                            
+                            for i, (label, val) in enumerate(zip(sub_labels, sub_values)):
+                                color_code = chart_colors[i % len(chart_colors)]
+                                pct = (val / total_komp_val) * 100
+                                html_table += f"""
+                                <tr style="border-bottom: 1px solid #f1f3f5;">
+                                  <td style="padding: 9px; color: #212529;"><span style="color: {color_code}; font-size: 16px; margin-right: 8px; vertical-align: middle;">■</span> {label}</td>
+                                  <td style="padding: 9px; text-align: right; font-weight: 500; color: #212529;">Rp {val:,.0f}</td>
+                                  <td style="padding: 9px; text-align: right; font-weight: 600; color: #495057;">{pct:.2f}%</td>
+                                </tr>
+                                """
+                            
+                            html_table += """
+                              </tbody>
+                            </table>
+                            </div>
+                            """
+                            st.markdown(html_table, unsafe_allow_html=True)
                         else:
                             st.info("Belum ada realisasi anggaran pada komponen ini.")
             else:

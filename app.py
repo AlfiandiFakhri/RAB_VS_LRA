@@ -7,6 +7,14 @@ import io
 import re
 from copy import copy
 
+# Pengaman untuk Library PowerPoint
+try:
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+    HAS_PPTX = True
+except ImportError:
+    HAS_PPTX = False
+
 # ==========================================
 # KONFIGURASI HALAMAN
 # ==========================================
@@ -42,50 +50,73 @@ def match_texts_smart(t1, t2):
     return False
 
 # ==========================================
-# FUNGSI PEMROSESAN DATA
+# FUNGSI PEMROSESAN DATA LRA & RAB
 # ==========================================
 def parse_lra_files(file_lra_list, list_semua_bulan):
     data_realisasi = {}
+    satker_summary = {"pagu": 0, "realisasi": 0, "sisa": 0, "outstanding": 0}
+    monthly_totals = {b: 0 for b in list_semua_bulan}
     
     for uploaded_lra in file_lra_list:
+        uploaded_lra.seek(0)
         df_raw = pd.read_excel(uploaded_lra, header=None, nrows=15)
+        uploaded_lra.seek(0)
+        
         bulan_file = None
         is_outstanding_file = False
         
-        # Cek dari NAMA FILE
-        fname_upper = uploaded_lra.name.upper().replace(" ", "")
-        if "SEMUALEVEL" in fname_upper or "ALLPERIODE" in fname_upper or "SEMUAPERIODE" in fname_upper:
+        # 1. Cek Bulan dari NAMA FILE
+        fname_upper = uploaded_lra.name.upper()
+        for b in list_semua_bulan:
+            if b in fname_upper:
+                bulan_file = b
+                break
+
+        # 2. Cek Bulan dari ISI FILE
+        if not bulan_file:
+            for r in range(len(df_raw)):
+                row_text_raw = " ".join(str(val) for val in df_raw.iloc[r].values if pd.notna(val)).upper()
+                for b in list_semua_bulan:
+                    if b in row_text_raw:
+                        bulan_file = b
+                        break
+                if bulan_file: break
+
+        # 3. Deteksi File Outstanding / All Periode
+        fname_clean = fname_upper.replace(" ", "")
+        keyword_out = ["SEMUA", "LEVEL", "ALL", "PERIODE", "REKAP", "GUP"]
+        if any(kw in fname_clean for kw in keyword_out) and not bulan_file:
             is_outstanding_file = True
 
-        # Cek dari ISI FILE
         for r in range(len(df_raw)):
             row_text_raw = " ".join(str(val) for val in df_raw.iloc[r].values if pd.notna(val)).upper()
-            row_text_clean = row_text_raw.replace(" ", "")
-            
-            if "SEMUALEVEL" in row_text_clean or "ALLPERIODE" in row_text_clean:
-                is_outstanding_file = True
-                
-            for b in list_semua_bulan:
-                if b in row_text_raw:
-                    bulan_file = b
+            if any(k in row_text_raw for k in ["SEMUA", "LEVEL", "ALL", "PERIODE"]):
+                if not bulan_file:
+                    is_outstanding_file = True
                     break
-                    
-        if not bulan_file:
-            for b in list_semua_bulan:
-                if b in uploaded_lra.name.upper():
-                    bulan_file = b
-                    break
-                    
+
         df_lra = pd.read_excel(uploaded_lra, skiprows=5)
         
-        # Failsafe Lapis 3
         kolom_lra = [str(col).upper() for col in df_lra.columns]
-        ada_gup = any('GUP' in col for col in kolom_lra)
-        ada_spm = any('SPM' in col for col in kolom_lra)
-        
-        if not bulan_file and (ada_gup and ada_spm):
+        ada_gup_spm = any('GUP' in col or 'SPM' in col or 'VERIFIKASI' in col for col in kolom_lra)
+        if ada_gup_spm and not bulan_file:
             is_outstanding_file = True
-        
+
+        if is_outstanding_file:
+            # Ambil langsung dari baris Satker untuk akurasi mutlak
+            satker_row = df_lra[df_lra['Level'].astype(str).str.strip() == 'Satker']
+            if not satker_row.empty:
+                satker_summary["pagu"] = float(satker_row['Pagu'].values[0] or 0)
+                satker_summary["realisasi"] = float(satker_row['Total Realisasi'].values[0] or 0)
+                satker_summary["sisa"] = float(satker_row['Sisa'].values[0] or 0)
+            
+            # Hitung Outstanding presisi dari level Detail
+            detail_rows = df_lra[df_lra['Level'].astype(str).str.strip() == 'Detail']
+            gup_sum = pd.to_numeric(detail_rows['GUP'], errors='coerce').fillna(0).sum()
+            spm_sum = pd.to_numeric(detail_rows['SPM'], errors='coerce').fillna(0).sum()
+            verif_sum = pd.to_numeric(detail_rows['Verifikasi'], errors='coerce').fillna(0).sum()
+            satker_summary["outstanding"] = gup_sum + spm_sum + verif_sum
+
         if not bulan_file and not is_outstanding_file:
             continue
             
@@ -100,25 +131,10 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
             except: realisasi = 0
             if pd.isna(realisasi): realisasi = 0
                 
-            outstanding_val = 0
-            if is_outstanding_file:
-                val_gup = row.get('GUP', 0)
-                val_spm = row.get('SPM', 0)
-                val_verifikasi = row.get('Verifikasi', 0)
-                
-                try: val_gup = float(val_gup)
-                except: val_gup = 0
-                if pd.isna(val_gup): val_gup = 0
-                
-                try: val_spm = float(val_spm)
-                except: val_spm = 0
-                if pd.isna(val_spm): val_spm = 0
-                
-                try: val_verifikasi = float(val_verifikasi)
-                except: val_verifikasi = 0
-                if pd.isna(val_verifikasi): val_verifikasi = 0
-                
-                outstanding_val = val_gup + val_spm + val_verifikasi
+            val_gup = float(row.get('GUP') or 0) if pd.notna(row.get('GUP')) else 0.0
+            val_spm = float(row.get('SPM') or 0) if pd.notna(row.get('SPM')) else 0.0
+            val_verifikasi = float(row.get('Verifikasi') or 0) if pd.notna(row.get('Verifikasi')) else 0.0
+            outstanding_val = val_gup + val_spm + val_verifikasi
                 
             if lvl == 'Komponen':
                 match = re.search(r'(\d{3})\s*-', uraian)
@@ -145,11 +161,12 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 
                 if bulan_file:
                     data_realisasi[kamar_unik][norm_lra][bulan_file] += realisasi
+                    monthly_totals[bulan_file] += realisasi
                 
                 if is_outstanding_file:
                     data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] += outstanding_val
                 
-    return data_realisasi
+    return data_realisasi, satker_summary, monthly_totals
 
 def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     wb = load_workbook(file_rab)
@@ -277,7 +294,6 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
                 })
 
                 data_ref = ws.cell(row=target_row, column=19)
-                
                 for c_idx in range(20, 36):
                     c = ws.cell(row=target_row, column=c_idx)
                     if data_ref.has_style:
@@ -293,6 +309,31 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     output.seek(0)
     
     return output, data_ditemukan, pd.DataFrame(summary_preview)
+
+def generate_pptx_presentation(metrics, monthly_totals):
+    if not HAS_PPTX:
+        return None
+    prs = Presentation()
+    
+    slide_layout = prs.slide_layouts[0]
+    slide = prs.slides.add_slide(slide_layout)
+    slide.shapes.title.text = "LAPORAN KONSOLIDASI ANGGARAN"
+    slide.placeholders[1].text = "Executive Summary RAB vs LRA Tahun 2026\nAsdep PIMEN - Kementerian Koperasi dan UKM"
+
+    slide_layout = prs.slide_layouts[1]
+    slide = prs.slides.add_slide(slide_layout)
+    slide.shapes.title.text = "Ringkasan Kinerja Anggaran (Executive Metrics)"
+    
+    tf = slide.placeholders[1].text_frame
+    tf.text = f"• Total Pagu Anggaran : Rp {metrics['pagu']:,.0f}"
+    tf.add_paragraph().text = f"• Total Realisasi (incl. Outstanding) : Rp {metrics['realisasi']:,.0f}"
+    tf.add_paragraph().text = f"• Total Sisa Anggaran : Rp {metrics['sisa']:,.0f}"
+    tf.add_paragraph().text = f"• Rata-rata Tingkat Penyerapan : {metrics['persentase']:.2f}%"
+
+    output = io.BytesIO()
+    prs.save(output)
+    output.seek(0)
+    return output
 
 # ==========================================
 # ANTARMUKA PENGGUNA (UI)
@@ -321,7 +362,7 @@ if file_rab and file_lra_list:
         try:
             with st.status("Sedang memproses dokumen dan menyusun ringkasan...", expanded=True) as status:
                 st.write("Mengekstrak data dari seluruh LRA (Realisasi & Outstanding)...")
-                data_realisasi = parse_lra_files(file_lra_list, list_semua_bulan)
+                data_realisasi, satker_summary, monthly_totals = parse_lra_files(file_lra_list, list_semua_bulan)
                 
                 st.write("Menyelaraskan dan memodifikasi template RAB...")
                 output_excel, data_ditemukan, df_preview = process_rab_lra(file_rab, data_realisasi, list_semua_bulan)
@@ -332,23 +373,18 @@ if file_rab and file_lra_list:
             st.divider()
 
             # ==========================================
-            # DASHBOARD EXECUTIVE SUMMARY METRICS
+            # DASHBOARD EXECUTIVE SUMMARY METRICS (VALID)
             # ==========================================
             st.subheader("📈 Dashboard Ringkasan Eksekutif (Executive Summary)")
             
-            total_pagu_all = df_preview['Pagu'].sum() if not df_preview.empty else 0
-            total_out_all = df_preview['Outstanding'].sum() if not df_preview.empty else 0
+            # Gunakan data Satker resmi dari LRA All Periode
+            total_pagu_all = satker_summary["pagu"]
+            total_realisasi_bulanan = satker_summary["realisasi"]
+            total_out_all = satker_summary["outstanding"]
             
-            monthly_sums = {}
-            for b in list_semua_bulan:
-                if not df_preview.empty and b in df_preview.columns:
-                    monthly_sums[b] = df_preview[b].sum()
-                else:
-                    monthly_sums[b] = 0
-            
-            total_realisasi_bulanan = sum(monthly_sums.values())
+            # Total Realisasi termasuk Outstanding
             total_realisasi_incl_out = total_realisasi_bulanan + total_out_all
-            total_sisa_all = total_pagu_all - total_realisasi_incl_out
+            total_sisa_all = satker_summary["sisa"]
             persen_nasional = (total_realisasi_incl_out / total_pagu_all * 100) if total_pagu_all > 0 else 0
 
             # Kartu Metrik Utama
@@ -360,7 +396,7 @@ if file_rab and file_lra_list:
 
             st.markdown("---")
             st.markdown("### 📊 Grafik Tren Penyerapan Anggaran Bulanan")
-            s_bulan = pd.Series(monthly_sums)
+            s_bulan = pd.Series(monthly_totals)
             st.bar_chart(s_bulan)
 
             with st.expander("🔍 Pratinjau & Filter Data Konsolidasi", expanded=False):

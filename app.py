@@ -99,7 +99,8 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
     data_realisasi = {}
     satker_summary = {"pagu": 0, "realisasi": 0, "sisa": 0, "outstanding": 0}
     monthly_totals = {b: 0 for b in list_semua_bulan}
-    component_summary = {} # Menyimpan {nama_kompeten_lengkap: pagu}
+    component_summary = {}
+    sub_component_summary = {} # Menyimpan rincian per Sub Komponen
     
     for uploaded_lra in file_lra_list:
         uploaded_lra.seek(0)
@@ -150,13 +151,20 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 satker_summary["realisasi"] = float(satker_row['Total Realisasi'].values[0] or 0)
                 satker_summary["sisa"] = float(satker_row['Sisa'].values[0] or 0)
             
-            # Ekstrak nama lengkap komponen langsung dari LRA All Periode
-            komp_rows = df_lra[df_lra['Level'].astype(str).str.strip() == 'Komponen']
-            for _, k_row in komp_rows.iterrows():
-                k_uraian = str(k_row.get('Kode / Uraian', '')).strip()
-                k_pagu = float(k_row.get('Pagu') or 0)
-                if k_uraian:
-                    component_summary[k_uraian] = k_pagu
+            # Ekstrak Komponen & Sub Komponen dari LRA All Periode
+            current_komp = ""
+            for _, row_lra in df_lra.iterrows():
+                lvl = str(row_lra.get('Level')).strip()
+                uraian = str(row_lra.get('Kode / Uraian', '')).strip()
+                pagu = float(row_lra.get('Pagu') or 0)
+                
+                if lvl == 'Komponen':
+                    current_komp = uraian
+                    component_summary[current_komp] = pagu
+                elif lvl == 'Sub Komponen':
+                    if current_komp not in sub_component_summary:
+                        sub_component_summary[current_komp] = {}
+                    sub_component_summary[current_komp][uraian] = pagu
 
             detail_rows = df_lra[df_lra['Level'].astype(str).str.strip() == 'Detail']
             gup_sum = pd.to_numeric(detail_rows['GUP'], errors='coerce').fillna(0).sum()
@@ -213,7 +221,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 if is_outstanding_file:
                     data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] += outstanding_val
                 
-    return data_realisasi, satker_summary, monthly_totals, component_summary
+    return data_realisasi, satker_summary, monthly_totals, component_summary, sub_component_summary
 
 def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     wb = load_workbook(file_rab)
@@ -384,7 +392,7 @@ if file_rab and file_lra_list:
         try:
             with st.status("Sedang memproses dokumen dan menyusun ringkasan...", expanded=True) as status:
                 st.write("Mengekstrak data dari seluruh LRA (Realisasi & Outstanding)...")
-                data_realisasi, satker_summary, monthly_totals, component_summary = parse_lra_files(file_lra_list, list_semua_bulan)
+                data_realisasi, satker_summary, monthly_totals, component_summary, sub_component_summary = parse_lra_files(file_lra_list, list_semua_bulan)
                 
                 st.write("Menyelaraskan dan memodifikasi template RAB...")
                 output_excel, data_ditemukan, df_preview = process_rab_lra(file_rab, data_realisasi, list_semua_bulan)
@@ -413,7 +421,7 @@ if file_rab and file_lra_list:
 
             st.markdown("---")
             
-            # TAMPILAN GRAFIK BATANG BULANAN & DIAGRAM PIE KOMPONEN DALAM 2 KOLOM
+            # TAMPILAN GRAFIK BULANAN & DIAGRAM PIE SUB KOMPONEN
             col_chart1, col_chart2 = st.columns(2)
             
             with col_chart1:
@@ -423,44 +431,51 @@ if file_rab and file_lra_list:
                 st.bar_chart(s_bulan)
 
             with col_chart2:
-                st.markdown("### 🥧 Rincian Proporsi Pagu per Komponen")
+                st.markdown("### 🥧 Rincian Proporsi per Sub Komponen")
                 
                 if component_summary:
-                    comp_labels = list(component_summary.keys())
-                    comp_values = list(component_summary.values())
+                    # Pilih Komponen untuk melihat Sub Komponennya
+                    selected_komp_pie = st.selectbox("Pilih Komponen:", options=list(component_summary.keys()))
                     
-                    if sum(comp_values) > 0:
-                        fig, ax = plt.subplots(figsize=(6, 6))
+                    if selected_komp_pie in sub_component_summary and sub_component_summary[selected_komp_pie]:
+                        sub_dict = sub_component_summary[selected_komp_pie]
+                        sub_labels = list(sub_dict.keys())
+                        sub_values = list(sub_dict.values())
                         
-                        def make_autopct(values):
-                            def my_autopct(pct):
-                                total = sum(values)
-                                val = int(round(pct * total / 100.0))
-                                return f"{pct:.1f}%\n(Rp {val:,.0f})"
-                            return my_autopct
+                        if sum(sub_values) > 0:
+                            fig, ax = plt.subplots(figsize=(6, 6))
+                            
+                            def make_autopct(values):
+                                def my_autopct(pct):
+                                    total = sum(values)
+                                    val = int(round(pct * total / 100.0))
+                                    return f"{pct:.1f}%\n(Rp {val:,.0f})"
+                                return my_autopct
 
-                        wedges, texts, autotexts = ax.pie(
-                            comp_values, 
-                            autopct=make_autopct(comp_values), 
-                            startangle=90,
-                            colors=plt.cm.Pastel1.colors,
-                            textprops=dict(color="black", fontsize=8)
-                        )
-                        ax.axis('equal')
-                        
-                        # Menambahkan Legend (Keterangan Nama Komponen Lengkap di Samping Diagram)
-                        ax.legend(
-                            wedges, 
-                            comp_labels, 
-                            title="Komponen", 
-                            loc="center left", 
-                            bbox_to_anchor=(1, 0, 0.5, 1),
-                            fontsize=8
-                        )
-                        
-                        st.pyplot(fig)
+                            wedges, texts, autotexts = ax.pie(
+                                sub_values, 
+                                autopct=make_autopct(sub_values), 
+                                startangle=90,
+                                colors=plt.cm.Pastel2.colors,
+                                textprops=dict(color="black", fontsize=8)
+                            )
+                            ax.axis('equal')
+                            
+                            # Legend Sub Komponen di Samping
+                            ax.legend(
+                                wedges, 
+                                sub_labels, 
+                                title="Sub Komponen", 
+                                loc="center left", 
+                                bbox_to_anchor=(1, 0, 0.5, 1),
+                                fontsize=8
+                            )
+                            
+                            st.pyplot(fig)
+                        else:
+                            st.info("Nilai sub komponen bernilai 0.")
                     else:
-                        st.info("Nilai pagu komponen bernilai 0.")
+                        st.info("Tidak ada sub komponen pada komponen ini.")
                 else:
                     st.info("Data komponen LRA belum tersedia.")
 

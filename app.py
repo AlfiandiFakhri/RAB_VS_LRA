@@ -351,25 +351,23 @@ if file_rab and file_lra_list:
             st.subheader("📈 Dashboard Ringkasan Eksekutif (Executive Summary)")
             
             total_pagu_all = satker_summary["pagu"]
-            total_realisasi_bulanan = satker_summary["realisasi"]
-            total_out_all = satker_summary["outstanding"]
-            
-            total_realisasi_incl_out = total_realisasi_bulanan + total_out_all
+            total_realisasi_incl_out = satker_summary["realisasi"] # Nilai Satker LRA resmi (sudah mencakup akumulasi)
             total_sisa_all = satker_summary["sisa"]
             persen_nasional = (total_realisasi_incl_out / total_pagu_all * 100) if total_pagu_all > 0 else 0
 
             # Kartu Metrik Utama
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("💰 Total Pagu Anggaran", f"Rp {total_pagu_all:,.0f}")
-            m2.metric("📉 Total Realisasi (+ Outstd)", f"Rp {total_realisasi_incl_out:,.0f}")
+            m2.metric("📉 Total Realisasi", f"Rp {total_realisasi_incl_out:,.0f}")
             m3.metric("🟡 Sisa Anggaran", f"Rp {total_sisa_all:,.0f}")
             m4.metric("📊 Tingkat Penyerapan", f"{persen_nasional:.2f}%")
 
             st.markdown("---")
             st.markdown("### 📊 Grafik Tren Penyerapan Anggaran Bulanan")
             
-            # URUTKAN BULAN SECARA KRONOLOGIS (JANUARI s.d. DESEMBER)
-            s_bulan = pd.Series(monthly_totals).reindex(list_semua_bulan)
+            # URUTKAN BULAN KRONOLOGIS KIRI KE KANAN MENGGUNAKAN NOMOR PREFIX
+            monthly_sorted = {f"{i+1:02d}. {b}": monthly_totals[b] for i, b in enumerate(list_semua_bulan)}
+            s_bulan = pd.Series(monthly_sorted)
             st.bar_chart(s_bulan)
 
             with st.expander("🔍 Pratinjau & Filter Data Konsolidasi", expanded=False):

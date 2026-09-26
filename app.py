@@ -144,7 +144,6 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
         if ada_gup_spm and not bulan_file:
             is_outstanding_file = True
 
-        # Selalu cek dan ambil data Komponen & Sub Komponen jika file memiliki kolom Level
         if 'Level' in df_lra.columns:
             current_komp = ""
             for _, row_lra in df_lra.iterrows():
@@ -424,28 +423,31 @@ if file_rab and file_lra_list:
 
             st.markdown("---")
             
-            # TAMPILAN GRAFIK BULANAN & DIAGRAM PIE SUB KOMPONEN
-            col_chart1, col_chart2 = st.columns(2)
-            
-            with col_chart1:
-                st.markdown("### 📊 Tren Penyerapan Bulanan")
-                monthly_sorted = {f"{i+1:02d}. {b}": monthly_totals[b] for i, b in enumerate(list_semua_bulan)}
-                s_bulan = pd.Series(monthly_sorted)
-                st.bar_chart(s_bulan)
+            # TAMPILAN GRAFIK BULANAN
+            st.markdown("### 📊 Tren Penyerapan Bulanan")
+            monthly_sorted = {f"{i+1:02d}. {b}": monthly_totals[b] for i, b in enumerate(list_semua_bulan)}
+            s_bulan = pd.Series(monthly_sorted)
+            st.bar_chart(s_bulan)
 
-            with col_chart2:
-                st.markdown("### 🥧 Rincian Proporsi per Sub Komponen")
+            st.markdown("---")
+            st.markdown("### 🥧 Rincian Proporsi Sub Komponen per Komponen")
+            
+            # TAMPILKAN 2 DIAGRAM PIE BERDAMPINGAN UNTUK 2 KOMPONEN UTAMA
+            if sub_component_summary:
+                komp_keys = list(sub_component_summary.keys())
                 
-                if component_summary:
-                    selected_komp_pie = st.selectbox("Pilih Komponen:", options=list(component_summary.keys()))
-                    
-                    if selected_komp_pie in sub_component_summary and sub_component_summary[selected_komp_pie]:
-                        sub_dict = sub_component_summary[selected_komp_pie]
+                # Buat 2 kolom berdampingan
+                sub_cols = st.columns(len(komp_keys) if len(komp_keys) > 0 else 2)
+                
+                for idx, komp_name in enumerate(komp_keys):
+                    with sub_cols[idx]:
+                        st.markdown(f"**{komp_name}**")
+                        sub_dict = sub_component_summary[komp_name]
                         sub_labels = list(sub_dict.keys())
                         sub_values = list(sub_dict.values())
                         
                         if sum(sub_values) > 0:
-                            fig, ax = plt.subplots(figsize=(6, 6))
+                            fig, ax = plt.subplots(figsize=(5, 5))
                             
                             def make_autopct(values):
                                 def my_autopct(pct):
@@ -459,26 +461,25 @@ if file_rab and file_lra_list:
                                 autopct=make_autopct(sub_values), 
                                 startangle=90,
                                 colors=plt.cm.Pastel2.colors,
-                                textprops=dict(color="black", fontsize=8)
+                                textprops=dict(color="black", fontsize=7)
                             )
                             ax.axis('equal')
                             
+                            # Legend di bawah masing-masing pie chart agar rapi
                             ax.legend(
                                 wedges, 
                                 sub_labels, 
                                 title="Sub Komponen", 
-                                loc="center left", 
-                                bbox_to_anchor=(1, 0, 0.5, 1),
-                                fontsize=8
+                                loc="upper center", 
+                                bbox_to_anchor=(0.5, -0.1),
+                                fontsize=7
                             )
                             
                             st.pyplot(fig)
                         else:
                             st.info("Nilai sub komponen bernilai 0.")
-                    else:
-                        st.info("Tidak ada sub komponen pada komponen ini.")
-                else:
-                    st.info("Data komponen LRA belum tersedia.")
+            else:
+                st.info("Data sub komponen belum tersedia.")
 
             with st.expander("🔍 Pratinjau & Filter Data Konsolidasi", expanded=False):
                 if not df_preview.empty:

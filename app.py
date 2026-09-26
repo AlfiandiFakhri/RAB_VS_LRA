@@ -70,15 +70,41 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
         if not bulan_file:
             continue # Skip jika bulan tidak terdeteksi
             
-        # Baca LRA
+        # Baca LRA (Mulai Baris ke-6)
         df_lra = pd.read_excel(uploaded_lra, skiprows=5)
+        
+        # =========================================================================
+        # REVISI: Cari nama kolom Outstanding secara dinamis (mengatasi beda spasi)
+        # =========================================================================
+        col_outstanding_name = 'GUP+SPM+Verifikasi' # Default
+        for col in df_lra.columns:
+            if isinstance(col, str):
+                c_clean = col.upper().replace(' ', '')
+                if 'GUP' in c_clean and 'SPM' in c_clean and 'VERIFIKASI' in c_clean:
+                    col_outstanding_name = col
+                    break
+
         cur_komp, cur_sub, cur_akun = "GLOBAL", "GLOBAL", "GLOBAL"
         
         for index, row in df_lra.iterrows():
             lvl = str(row.get('Level')).strip()
             uraian = str(row.get('Kode / Uraian', '')).strip()
+            
+            # Parsing Total Realisasi dengan error handling
             realisasi = row.get('Total Realisasi', 0)
+            try:
+                realisasi = float(realisasi)
+            except:
+                realisasi = 0
             if pd.isna(realisasi): realisasi = 0
+                
+            # Parsing Nilai Out Standing dengan error handling
+            outstanding_val = row.get(col_outstanding_name, 0)
+            try:
+                outstanding_val = float(outstanding_val)
+            except:
+                outstanding_val = 0
+            if pd.isna(outstanding_val): outstanding_val = 0
                 
             if lvl == 'Komponen':
                 match = re.search(r'(\d{3})\s*-', uraian)
@@ -98,9 +124,15 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 
             if pd.notna(uraian) and uraian not in ['nan', '']:
                 norm_lra = normalize_text(uraian)
+                
                 if norm_lra not in data_realisasi[kamar_unik]:
+                    # Tambahkan key 'OUTSTANDING' untuk menyimpan nilai Outstanding
                     data_realisasi[kamar_unik][norm_lra] = {b: 0 for b in list_semua_bulan}
+                    data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] = 0
+                
+                # Masukkan realisasi ke bulannya, dan jumlahkan nilai Outstanding
                 data_realisasi[kamar_unik][norm_lra][bulan_file] += realisasi
+                data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] += outstanding_val
                 
     return data_realisasi
 
@@ -111,7 +143,6 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     baris_header = 13 
     baris_mulai_data = 14
     
-    # === REVISI: Penambahan Kolom OUT STANDING ===
     kolom_baru = [
         "TOTAL Realisasi", "SISA", "OUT STANDING", 
         "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", 
@@ -123,7 +154,7 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     
     warna_hijau = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
     warna_kuning = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-    warna_orange = PatternFill(start_color="FCD5B4", end_color="FCD5B4", fill_type="solid") # Warna untuk Out Standing
+    warna_orange = PatternFill(start_color="FCD5B4", end_color="FCD5B4", fill_type="solid") 
     
     # 1. Buat Header Baru
     for i, nama_kolom in enumerate(kolom_baru):
@@ -191,7 +222,10 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
             
             if matched_key:
                 kamar_ketemu, key_ketemu = matched_key
+                
+                # Pop data sekaligus nilai outstanding-nya
                 dict_bulanan = data_realisasi[kamar_ketemu].pop(key_ketemu) 
+                nilai_outstanding = dict_bulanan.pop('OUTSTANDING', 0)
                 
                 total_realisasi_val = sum(dict_bulanan.values())
                 
@@ -205,18 +239,18 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
                 baris_terpakai.add(target_row)
                 
                 # Mengisi Data ke Cell
-                cell_realisasi = ws.cell(row=target_row, column=20)
-                cell_sisa = ws.cell(row=target_row, column=21)
-                # cell_outstanding = ws.cell(row=target_row, column=22) # Kolom V
+                cell_realisasi = ws.cell(row=target_row, column=20)   # Kolom T
+                cell_sisa = ws.cell(row=target_row, column=21)        # Kolom U
+                cell_outstanding = ws.cell(row=target_row, column=22) # Kolom V
                 
                 cell_realisasi.value = total_realisasi_val
+                cell_outstanding.value = nilai_outstanding
                 
-                # Rumus default SISA (Kolom Pagu (S) dikurangi Kolom Realisasi (T))
-                # Jika Outstanding (V) ikut memotong SISA, rumusnya ubah menjadi: f"=S{target_row}-T{target_row}-V{target_row}"
-                cell_sisa.value = f"=S{target_row}-T{target_row}"
+                # Rumus SISA: Pagu(S) - Total Realisasi(T) - Out Standing(V)
+                cell_sisa.value = f"=S{target_row}-T{target_row}-V{target_row}"
                 
                 for idx_b, b_name in enumerate(list_semua_bulan):
-                    col_target_bulan = 23 + idx_b # Indeks bergeser +1 karena ada kolom Out Standing
+                    col_target_bulan = 23 + idx_b # Indeks 23 (W) = Januari
                     cell_bulan = ws.cell(row=target_row, column=col_target_bulan)
                     cell_bulan.value = dict_bulanan[b_name]
 
@@ -267,7 +301,7 @@ if file_rab and file_lra_list:
             with st.status("Sedang memproses dokumen...", expanded=True) as status:
                 
                 # Step 1
-                st.write("Mengekstrak data dari seluruh LRA...")
+                st.write("Mengekstrak data dari seluruh LRA (Realisasi & Outstanding)...")
                 data_realisasi = parse_lra_files(file_lra_list, list_semua_bulan)
                 
                 # Step 2

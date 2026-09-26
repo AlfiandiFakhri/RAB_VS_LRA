@@ -145,7 +145,8 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
         if ada_gup_spm and not bulan_file:
             is_outstanding_file = True
 
-        if 'Level' in df_lra.columns:
+        # Khusus ambil data Komponen dan Sub Komponen secara akurat dari file Outstanding / All Periode
+        if is_outstanding_file or 'Level' in df_lra.columns:
             current_komp = ""
             for _, row_lra in df_lra.iterrows():
                 lvl = str(row_lra.get('Level')).strip()
@@ -157,18 +158,21 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 if lvl == 'Komponen':
                     current_komp = uraian
                     component_summary[current_komp] = pagu
-                    component_metrics[current_komp] = {
-                        "pagu": pagu,
-                        "realisasi": realisasi_sub,
-                        "sisa": sisa_sub,
-                        "persen": (realisasi_sub / pagu * 100) if pagu > 0 else 0
-                    }
+                    # Hanya timpa component_metrics jika file ini adalah file rekap utama (outstanding / all periode)
+                    if is_outstanding_file or current_komp not in component_metrics or realisasi_sub > component_metrics[current_komp]['realisasi']:
+                        component_metrics[current_komp] = {
+                            "pagu": pagu,
+                            "realisasi": realisasi_sub,
+                            "sisa": sisa_sub,
+                            "persen": (realisasi_sub / pagu * 100) if pagu > 0 else 0
+                        }
                 elif lvl == 'Sub Komponen':
                     if current_komp:
                         if current_komp not in sub_component_realisasi:
                             sub_component_realisasi[current_komp] = {}
-                        if realisasi_sub > 0:
-                            sub_component_realisasi[current_komp][uraian] = realisasi_sub
+                        if is_outstanding_file or uraian not in sub_component_realisasi[current_komp] or realisasi_sub > sub_component_realisasi[current_komp].get(uraian, 0):
+                            if realisasi_sub > 0:
+                                sub_component_realisasi[current_komp][uraian] = realisasi_sub
 
         if is_outstanding_file:
             satker_row = df_lra[df_lra['Level'].astype(str).str.strip() == 'Satker']
@@ -423,7 +427,7 @@ if file_rab and file_lra_list:
             total_sisa_all = satker_summary["sisa"]
             persen_nasional = (total_realisasi_incl_out / total_pagu_all * 100) if total_pagu_all > 0 else 0
 
-            # Kartu Metrik Utama Nasional (Dibagi 4 kolom lebar)
+            # Kartu Metrik Utama Nasional
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("💰 Total Pagu Anggaran", f"Rp {total_pagu_all:,.0f}")
             m2.metric("📉 Total Realisasi", f"Rp {total_realisasi_incl_out:,.0f}")
@@ -434,12 +438,11 @@ if file_rab and file_lra_list:
             if component_metrics:
                 st.markdown("---")
                 st.markdown("### 🏷️ Ringkasan Per Komponen")
-                comp_cols = st.columns(2) # 2 Kolom Kiri & Kanan untuk Komponen 051 & 052
+                comp_cols = st.columns(2)
                 
                 for idx, (komp_name, metrics) in enumerate(component_metrics.items()):
                     with comp_cols[idx]:
                         st.markdown(f"**{komp_name}**")
-                        # Menggunakan 2 kolom di dalam kontainer komponen agar angka tampil utuh dan besar
                         sub_c1, sub_c2 = st.columns(2)
                         sub_c1.metric("Pagu", f"Rp {metrics['pagu']:,.0f}")
                         sub_c1.metric("Realisasi", f"Rp {metrics['realisasi']:,.0f}")
@@ -457,7 +460,7 @@ if file_rab and file_lra_list:
             st.markdown("---")
             st.markdown("### 🥧 Proporsi Total Realisasi Sub Komponen per Komponen")
             
-            # TAMPILKAN 2 DIAGRAM PIE BERDAMPINGAN KIRI-KANAN DENGAN LEGEND DI SEBELAH KANAN
+            # TAMPILKAN 2 DIAGRAM PIE BERDAMPINGAN KIRI-KANAN
             if sub_component_realisasi:
                 komp_keys = list(sub_component_realisasi.keys())
                 
@@ -489,7 +492,6 @@ if file_rab and file_lra_list:
                             )
                             ax.axis('equal')
                             
-                            # Posisi Legend di Samping Kanan Diagram Pie agar tidak bertumpuk
                             ax.legend(
                                 wedges, 
                                 sub_labels, 

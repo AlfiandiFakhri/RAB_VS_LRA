@@ -100,7 +100,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
     satker_summary = {"pagu": 0, "realisasi": 0, "sisa": 0, "outstanding": 0}
     monthly_totals = {b: 0 for b in list_semua_bulan}
     component_summary = {}
-    component_metrics = {} # Menyimpan metrik detail per komponen
+    component_metrics = {}
     sub_component_realisasi = {}
     
     for uploaded_lra in file_lra_list:
@@ -423,26 +423,28 @@ if file_rab and file_lra_list:
             total_sisa_all = satker_summary["sisa"]
             persen_nasional = (total_realisasi_incl_out / total_pagu_all * 100) if total_pagu_all > 0 else 0
 
-            # Kartu Metrik Utama Nasional
+            # Kartu Metrik Utama Nasional (Dibagi 4 kolom lebar)
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("💰 Total Pagu Anggaran", f"Rp {total_pagu_all:,.0f}")
             m2.metric("📉 Total Realisasi", f"Rp {total_realisasi_incl_out:,.0f}")
             m3.metric("🟡 Sisa Anggaran", f"Rp {total_sisa_all:,.0f}")
             m4.metric("📊 Tingkat Penyerapan", f"{persen_nasional:.2f}%")
 
-            # --- KARTU METRIK PER 2 KOMPONEN UTAMA ---
+            # --- KARTU METRIK PER 2 KOMPONEN UTAMA (KIRI & KANAN) ---
             if component_metrics:
                 st.markdown("---")
                 st.markdown("### 🏷️ Ringkasan Per Komponen")
-                comp_cols = st.columns(len(component_metrics))
+                comp_cols = st.columns(2) # 2 Kolom Kiri & Kanan untuk Komponen 051 & 052
+                
                 for idx, (komp_name, metrics) in enumerate(component_metrics.items()):
                     with comp_cols[idx]:
                         st.markdown(f"**{komp_name}**")
-                        sub_m1, sub_m2, sub_m3, sub_m4 = st.columns(4)
-                        sub_m1.metric("Pagu", f"Rp {metrics['pagu']:,.0f}")
-                        sub_m2.metric("Realisasi", f"Rp {metrics['realisasi']:,.0f}")
-                        sub_m3.metric("Sisa", f"Rp {metrics['sisa']:,.0f}")
-                        sub_m4.metric("Penyerapan", f"{metrics['persen']:.2f}%")
+                        # Menggunakan 2 kolom di dalam kontainer komponen agar angka tampil utuh dan besar
+                        sub_c1, sub_c2 = st.columns(2)
+                        sub_c1.metric("Pagu", f"Rp {metrics['pagu']:,.0f}")
+                        sub_c1.metric("Realisasi", f"Rp {metrics['realisasi']:,.0f}")
+                        sub_c2.metric("Sisa", f"Rp {metrics['sisa']:,.0f}")
+                        sub_c2.metric("Penyerapan", f"{metrics['persen']:.2f}%")
 
             st.markdown("---")
             
@@ -455,7 +457,7 @@ if file_rab and file_lra_list:
             st.markdown("---")
             st.markdown("### 🥧 Proporsi Total Realisasi Sub Komponen per Komponen")
             
-            # TAMPILKAN 2 DIAGRAM PIE BERDAMPINGAN BERDASARKAN TOTAL REALISASI
+            # TAMPILKAN 2 DIAGRAM PIE BERDAMPINGAN KIRI-KANAN DENGAN LEGEND DI SEBELAH KANAN
             if sub_component_realisasi:
                 komp_keys = list(sub_component_realisasi.keys())
                 
@@ -469,7 +471,7 @@ if file_rab and file_lra_list:
                         sub_values = list(sub_dict.values())
                         
                         if sum(sub_values) > 0:
-                            fig, ax = plt.subplots(figsize=(5, 5))
+                            fig, ax = plt.subplots(figsize=(6, 5))
                             
                             def make_autopct(values):
                                 def my_autopct(pct):
@@ -487,12 +489,13 @@ if file_rab and file_lra_list:
                             )
                             ax.axis('equal')
                             
+                            # Posisi Legend di Samping Kanan Diagram Pie agar tidak bertumpuk
                             ax.legend(
                                 wedges, 
                                 sub_labels, 
                                 title="Sub Komponen", 
-                                loc="upper center", 
-                                bbox_to_anchor=(0.5, -0.1),
+                                loc="center left", 
+                                bbox_to_anchor=(1, 0, 0.5, 1),
                                 fontsize=7
                             )
                             

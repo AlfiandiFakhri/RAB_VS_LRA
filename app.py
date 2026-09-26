@@ -6,8 +6,8 @@ from openpyxl.utils import get_column_letter
 import io
 import re
 from copy import copy
-import plotly.express as px
-import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+import numpy as np
 
 # Pengaman untuk Library PowerPoint
 try:
@@ -450,37 +450,37 @@ if file_rab and file_lra_list:
 
             st.markdown("---")
             
-            # TAMPILAN GRAFIK BULANAN 3D INTERAKTIF (PLOTLY)
-            st.markdown("### 📊 Tren Penyerapan Bulanan (3D Style)")
-            df_monthly_chart = pd.DataFrame({
-                "Bulan": list(monthly_totals.keys()),
-                "Realisasi": list(monthly_totals.values())
-            })
-            fig_monthly = px.bar(
-                df_monthly_chart, 
-                x="Bulan", 
-                y="Realisasi",
-                text_auto='.2s',
-                title="Grafik Penyerapan Anggaran Bulanan",
-                color="Realisasi",
-                color_continuous_scale="Viridis"
-            )
-            fig_monthly.update_layout(
-                plot_bgcolor="rgba(0,0,0,0)",
-                paper_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="black"),
-                xaxis_title="Bulan",
-                yaxis_title="Total Realisasi (Rp)"
-            )
-            st.plotly_chart(fig_monthly, use_container_width=True)
+            # TAMPILAN GRAFIK BATANG 3D PERSPEKTIF NYATA (MATPLOTLIB 3D)
+            st.markdown("### 📊 Tren Penyerapan Bulanan (Grafik 3D Perspektif)")
+            fig3d, ax3d = plt.subplots(figsize=(10, 5), subplot_kw={'projection': '3d'})
+            
+            bulan_list = list(monthly_totals.keys())
+            realisasi_list = list(monthly_totals.values())
+            x_pos = np.arange(len(bulan_list))
+            y_pos = np.zeros(len(bulan_list))
+            z_pos = np.zeros(len(bulan_list))
+            dx = 0.4
+            dy = 0.4
+            dz = np.array(realisasi_list) / 1e6 # Dalam Juta agar proporsional di 3D
+
+            # Warna batang bernuansa profesional
+            colors = plt.cm.viridis(np.linspace(0.2, 0.8, len(bulan_list)))
+            
+            ax3d.bar3d(x_pos, y_pos, z_pos, dx, dy, dz, color=colors, shade=True)
+            ax3d.set_xticks(x_pos + dx/2)
+            ax3d.set_xticklabels([b[:3] for b in bulan_list], fontsize=8)
+            ax3d.set_ylabel('')
+            ax3d.set_zlabel('Realisasi (Juta Rp)', fontsize=9)
+            ax3d.set_title('Perspektif 3D Penyerapan Bulanan', fontsize=11, fontweight='bold')
+            st.pyplot(fig3d)
 
             st.markdown("---")
-            st.markdown("### 🥧 Proporsi Total Realisasi Sub Komponen per Komponen (Interactive 3D / Donut Style)")
+            st.markdown("### 🥧 Proporsi Total Realisasi Sub Komponen per Komponen (3D Style)")
             
-            # TAMPILKAN 2 DIAGRAM DONUT/PIE 3D-STYLE BERDAMPINGAN KIRI-KANAN MENGGUNAKAN PLOTLY
+            # TAMPILKAN 2 DIAGRAM PIE 3D BERDAMPINGAN KIRI-KANAN MENGGUNAKAN MATPLOTLIB
             if sub_component_realisasi:
                 komp_keys = list(sub_component_realisasi.keys())
-                sub_cols = st.columns(len(komp_keys) if len(komp_keys) > 0 else 2)
+                sub_cols = st.columns(2)
                 
                 for idx, komp_name in enumerate(komp_keys):
                     with sub_cols[idx]:
@@ -490,24 +490,34 @@ if file_rab and file_lra_list:
                         sub_values = list(sub_dict.values())
                         
                         if sum(sub_values) > 0:
-                            fig_pie = go.Figure(data=[go.Pie(
-                                labels=sub_labels,
-                                values=sub_values,
-                                hole=0.3, # Efek Donut 3D modern
-                                textinfo='label+percent',
-                                hoverinfo='label+value+percent',
-                                textfont_size=10,
-                                marker=dict(colors=px.colors.qualitative.Pastel)
-                            )])
-                            fig_pie.update_layout(
-                                title=f"Rincian Sub Komponen",
-                                plot_bgcolor="rgba(0,0,0,0)",
-                                paper_bgcolor="rgba(0,0,0,0)",
-                                margin=dict(t=30, b=30, l=10, r=10),
-                                showlegend=True,
-                                legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
+                            fig_pie, ax_pie = plt.subplots(figsize=(6, 5), subplot_kw=dict(aspect="equal"))
+                            
+                            def make_autopct(values):
+                                def my_autopct(pct):
+                                    total = sum(values)
+                                    val = int(round(pct * total / 100.0))
+                                    return f"{pct:.1f}%\n(Rp {val:,.0f})"
+                                return my_autopct
+
+                            wedges, texts, autotexts = ax_pie.pie(
+                                sub_values, 
+                                autopct=make_autopct(sub_values), 
+                                startangle=90,
+                                shadow=True, # Efek bayangan 3D asli
+                                colors=plt.cm.Pastel1.colors,
+                                textprops=dict(color="black", fontsize=8)
                             )
-                            st.plotly_chart(fig_pie, use_container_width=True)
+                            
+                            # Keterangan Legend di samping kanan agar bersih dan tidak bertumpuk
+                            ax_pie.legend(
+                                wedges, 
+                                sub_labels, 
+                                title="Sub Komponen", 
+                                loc="center left", 
+                                bbox_to_anchor=(1, 0, 0.5, 1),
+                                fontsize=8
+                            )
+                            st.pyplot(fig_pie)
                         else:
                             st.info("Belum ada realisasi anggaran pada komponen ini.")
             else:

@@ -99,7 +99,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
     data_realisasi = {}
     satker_summary = {"pagu": 0, "realisasi": 0, "sisa": 0, "outstanding": 0}
     monthly_totals = {b: 0 for b in list_semua_bulan}
-    component_summary = {} # Untuk menyimpan Pagu per Komponen langsung dari LRA All Periode
+    component_summary = {} # Menyimpan {nama_kompeten_lengkap: pagu}
     
     for uploaded_lra in file_lra_list:
         uploaded_lra.seek(0)
@@ -150,15 +150,13 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 satker_summary["realisasi"] = float(satker_row['Total Realisasi'].values[0] or 0)
                 satker_summary["sisa"] = float(satker_row['Sisa'].values[0] or 0)
             
-            # Ekstrak Pagu Komponen langsung dari LRA All Periode (Level Komponen)
+            # Ekstrak nama lengkap komponen langsung dari LRA All Periode
             komp_rows = df_lra[df_lra['Level'].astype(str).str.strip() == 'Komponen']
             for _, k_row in komp_rows.iterrows():
-                k_uraian = str(k_row.get('Kode / Uraian', ''))
-                match_k = re.search(r'(\d{3})\s*-', k_uraian)
-                if match_k:
-                    k_id = match_k.group(1)
-                    k_pagu = float(k_row.get('Pagu') or 0)
-                    component_summary[k_id] = k_pagu
+                k_uraian = str(k_row.get('Kode / Uraian', '')).strip()
+                k_pagu = float(k_row.get('Pagu') or 0)
+                if k_uraian:
+                    component_summary[k_uraian] = k_pagu
 
             detail_rows = df_lra[df_lra['Level'].astype(str).str.strip() == 'Detail']
             gup_sum = pd.to_numeric(detail_rows['GUP'], errors='coerce').fillna(0).sum()
@@ -427,15 +425,13 @@ if file_rab and file_lra_list:
             with col_chart2:
                 st.markdown("### 🥧 Rincian Proporsi Pagu per Komponen")
                 
-                # Gunakan data komponen resmi dari File LRA All Periode
                 if component_summary:
-                    comp_labels = [f"Komponen {k}" for k in component_summary.keys()]
+                    comp_labels = list(component_summary.keys())
                     comp_values = list(component_summary.values())
                     
                     if sum(comp_values) > 0:
-                        fig, ax = plt.subplots(figsize=(5, 5))
+                        fig, ax = plt.subplots(figsize=(6, 6))
                         
-                        # Fungsi kustom agar label menampilkan Persentase sekaligus Nominal Rupiah
                         def make_autopct(values):
                             def my_autopct(pct):
                                 total = sum(values)
@@ -445,13 +441,23 @@ if file_rab and file_lra_list:
 
                         wedges, texts, autotexts = ax.pie(
                             comp_values, 
-                            labels=comp_labels, 
                             autopct=make_autopct(comp_values), 
                             startangle=90,
                             colors=plt.cm.Pastel1.colors,
-                            textprops=dict(color="black", fontsize=9)
+                            textprops=dict(color="black", fontsize=8)
                         )
                         ax.axis('equal')
+                        
+                        # Menambahkan Legend (Keterangan Nama Komponen Lengkap di Samping Diagram)
+                        ax.legend(
+                            wedges, 
+                            comp_labels, 
+                            title="Komponen", 
+                            loc="center left", 
+                            bbox_to_anchor=(1, 0, 0.5, 1),
+                            fontsize=8
+                        )
+                        
                         st.pyplot(fig)
                     else:
                         st.info("Nilai pagu komponen bernilai 0.")

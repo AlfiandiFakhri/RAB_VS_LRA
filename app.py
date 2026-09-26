@@ -451,27 +451,26 @@ if file_rab and file_lra_list:
 
             st.markdown("---")
             
-            # TAMPILAN GRAFIK BATANG 3D INTERAKTIF MODERN (PLOTLY MESH / 3D BAR LOOK)
-            st.markdown("### 📊 Tren Penyerapan Bulanan (Interactive 3D Perspective)")
+            # TAMPILAN GRAFIK BULANAN DENGAN ANGKA UTUH DI ATAS BATANG
+            st.markdown("### 📊 Tren Penyerapan Bulanan")
             
             df_monthly_chart = pd.DataFrame({
                 "Bulan": list(monthly_totals.keys()),
                 "Realisasi": list(monthly_totals.values())
             })
             
-            # Membuat grafik batang dengan efek pencahayaan 3D dan teks angka utuh di atas batang
             fig_3d_bar = px.bar(
                 df_monthly_chart,
                 x="Bulan",
                 y="Realisasi",
                 text=df_monthly_chart["Realisasi"].apply(lambda x: f"Rp {x:,.0f}" if x > 0 else "Rp 0"),
-                title="Visualisasi 3D Realisasi Anggaran per Bulan",
+                title="Realisasi Anggaran per Bulan",
                 color="Realisasi",
                 color_continuous_scale="Tealgrn"
             )
             fig_3d_bar.update_traces(
                 textposition='outside', 
-                textfont_size=10,
+                textfont_size=11,
                 marker_line_color='rgb(8,48,107)',
                 marker_line_width=1.5,
                 opacity=0.9
@@ -482,16 +481,16 @@ if file_rab and file_lra_list:
                 font=dict(color="black", size=12),
                 xaxis_title="Bulan",
                 yaxis_title="Total Realisasi (Rp)",
+                height=480,
                 uniformtext_minsize=8, 
-                uniformtext_mode='hide',
-                height=500
+                uniformtext_mode='hide'
             )
             st.plotly_chart(fig_3d_bar, use_container_width=True)
 
             st.markdown("---")
-            st.markdown("### 🥧 Proporsi Total Realisasi Sub Komponen per Komponen (Modern 3D Donut)")
+            st.markdown("### 📋 Rincian Proporsi Total Realisasi Sub Komponen per Komponen")
             
-            # TAMPILKAN 2 DIAGRAM DONUT 3D BERDAMPINGAN KIRI-KANAN YANG SANGAT BERSIH & MUDAH DIBACA
+            # TAMPILKAN 2 KOLOM: DIAGRAM PIE/DONUT RINGKAS & TABEL RINCIAN ANGKA LANGSUNG (TANPA PERLU HOVER)
             if sub_component_realisasi:
                 komp_keys = list(sub_component_realisasi.keys())
                 sub_cols = st.columns(2)
@@ -504,32 +503,32 @@ if file_rab and file_lra_list:
                         sub_values = list(sub_dict.values())
                         
                         if sum(sub_values) > 0:
+                            # 1. Grafik Donut Ringkas (Tanpa legenda panjang yang menumpuk)
                             fig_donut = go.Figure(data=[go.Pie(
-                                labels=sub_labels,
+                                labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels], # Singkat label di gambar
                                 values=sub_values,
-                                hole=0.45, # Efek Donut 3D estetik
-                                textinfo='percent+label',
+                                hole=0.4,
+                                textinfo='percent',
                                 hoverinfo='label+value+percent',
-                                textfont_size=10,
+                                textfont_size=12,
                                 marker=dict(colors=px.colors.qualitative.Bold, line=dict(color='#FFFFFF', width=2))
                             )])
                             fig_donut.update_layout(
-                                title=dict(text=f"Rincian Sub Komponen", font=dict(size=14)),
                                 plot_bgcolor="rgba(0,0,0,0)",
                                 paper_bgcolor="rgba(0,0,0,0)",
-                                margin=dict(t=40, b=40, l=20, r=20),
-                                showlegend=True,
-                                legend=dict(
-                                    orientation="h", 
-                                    yanchor="top", 
-                                    y=-0.25, 
-                                    xanchor="center", 
-                                    x=0.5,
-                                    font=dict(size=9)
-                                ),
-                                height=450
+                                margin=dict(t=20, b=20, l=20, r=20),
+                                showlegend=False, # Sembunyikan legenda agar tidak memenuhi layar
+                                height=300
                             )
                             st.plotly_chart(fig_donut, use_container_width=True)
+                            
+                            # 2. Tabel Rincian Data Langsung (Sangat mudah dibaca tanpa kursor)
+                            df_sub_table = pd.DataFrame({
+                                "Sub Komponen": sub_labels,
+                                "Total Realisasi (Rp)": [f"Rp {v:,.0f}" for v in sub_values],
+                                "Persentase": [f"{(v / sum(sub_values) * 100):.2f}%" for v in sub_values]
+                            })
+                            st.dataframe(df_sub_table, use_container_width=True, hide_index=True)
                         else:
                             st.info("Belum ada realisasi anggaran pada komponen ini.")
             else:

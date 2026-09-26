@@ -6,7 +6,7 @@ from openpyxl.utils import get_column_letter
 import io
 import re
 from copy import copy
-import plotly.express as px
+import matplotlib.pyplot as plt
 
 # Pengaman untuk Library PowerPoint
 try:
@@ -368,7 +368,7 @@ if file_rab and file_lra_list:
 
             st.markdown("---")
             
-            # TAMPILAN GRAFIK (BAR & PIE) DALAM 2 KOLOM
+            # TAMPILAN GRAFIK (BAR & PIE MATPLOTLIB) DALAM 2 KOLOM
             col_chart1, col_chart2 = st.columns(2)
             
             with col_chart1:
@@ -381,15 +381,17 @@ if file_rab and file_lra_list:
                 st.markdown("### 🥧 Proporsi Pagu per Komponen")
                 if not df_preview.empty:
                     df_comp = df_preview.groupby("Komponen")["Pagu"].sum().reset_index()
-                    fig_pie = px.pie(
-                        df_comp, 
-                        names="Komponen", 
-                        values="Pagu", 
-                        hole=0.4,
-                        color_discrete_sequence=px.colors.qualitative.Pastel
+                    
+                    fig, ax = plt.subplots(figsize=(5, 5))
+                    ax.pie(
+                        df_comp['Pagu'], 
+                        labels=df_comp['Komponen'], 
+                        autopct='%1.1f%%', 
+                        startangle=90,
+                        colors=plt.cm.Pastel1.colors
                     )
-                    fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-                    st.plotly_chart(fig_pie, use_container_width=True)
+                    ax.axis('equal')
+                    st.pyplot(fig)
                 else:
                     st.info("Data komponen belum tersedia.")
 

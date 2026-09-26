@@ -98,145 +98,129 @@ def get_row_pagu(ws, row_idx):
         return 0.0
 
 # ==========================================
-# FUNGSI PEMROSESAN DATA LRA & RAB
+# FUNGSI PEMROSESAN DATA LRA & RAB (Disesuaikan dengan Kolom Bulan di LRA)
 # ==========================================
 def parse_lra_files(file_lra_list, list_semua_bulan):
     data_realisasi = {}
     satker_summary = {"pagu": 0, "realisasi": 0, "sisa": 0, "outstanding": 0}
-    monthly_totals = {b: 0 for b in list_semua_bulan}
+    monthly_totals = {b: 0.0 for b in list_semua_bulan}
     component_summary = {}
     component_metrics = {}
     sub_component_realisasi = {}
     
     for uploaded_lra in file_lra_list:
         uploaded_lra.seek(0)
-        df_raw = pd.read_excel(uploaded_lra, header=None, nrows=15)
-        uploaded_lra.seek(0)
+        # Coba baca file dengan skiprows=5, jika gagal baca normal
+        try:
+            df_lra = pd.read_excel(uploaded_lra, skiprows=5)
+        except:
+            uploaded_lra.seek(0)
+            df_lra = pd.read_excel(uploaded_lra)
+            
+        df_lra.columns = [str(c).strip() for c in df_lra.columns]
+        col_upper_map = {str(c).upper(): c for c in df_lra.columns}
         
-        bulan_file = None
-        is_outstanding_file = False
+        # Cek apakah file LRA memiliki kolom bulan secara lengkap
+        has_monthly_cols = all(b in col_upper_map for b in list_semua_bulan)
         
-        fname_upper = uploaded_lra.name.upper()
-        for b in list_semua_bulan:
-            if b in fname_upper:
-                bulan_file = b
-                break
-
-        if not bulan_file:
-            for r in range(len(df_raw)):
-                row_text_raw = " ".join(str(val) for val in df_raw.iloc[r].values if pd.notna(val)).upper()
-                for b in list_semua_bulan:
-                    if b in row_text_raw:
-                        bulan_file = b
-                        break
-                if bulan_file: break
-
-        fname_clean = fname_upper.replace(" ", "")
-        keyword_out = ["SEMUA", "LEVEL", "ALL", "PERIODE", "REKAP", "GUP"]
-        if any(kw in fname_clean for kw in keyword_out) and not bulan_file:
-            is_outstanding_file = True
-
-        for r in range(len(df_raw)):
-            row_text_raw = " ".join(str(val) for val in df_raw.iloc[r].values if pd.notna(val)).upper()
-            if any(k in row_text_raw for k in ["SEMUA", "LEVEL", "ALL", "PERIODE"]):
-                if not bulan_file:
-                    is_outstanding_file = True
+        # Cari kolom level & uraian
+        level_col = col_upper_map.get('LEVEL', None)
+        if not level_col:
+            for c in df_lra.columns:
+                if 'level' in str(c).lower():
+                    level_col = c
                     break
 
-        df_lra = pd.read_excel(uploaded_lra, skiprows=5)
-        
-        kolom_lra = [str(col).upper() for col in df_lra.columns]
-        ada_gup_spm = any('GUP' in col or 'SPM' in col or 'VERIFIKASI' in col for col in kolom_lra)
-        if ada_gup_spm and not bulan_file:
-            is_outstanding_file = True
-
-        if 'Level' in df_lra.columns:
-            current_komp = ""
-            for _, row_lra in df_lra.iterrows():
-                lvl = str(row_lra.get('Level')).strip()
-                uraian = str(row_lra.get('Kode / Uraian', '')).strip()
-                pagu = float(row_lra.get('Pagu') or 0)
-                realisasi_sub = float(row_lra.get('Total Realisasi') or 0)
-                sisa_sub = float(row_lra.get('Sisa') or 0)
-                
-                if lvl == 'Komponen':
-                    current_komp = uraian
-                    component_summary[current_komp] = pagu
-                    if is_outstanding_file or current_komp not in component_metrics or realisasi_sub > component_metrics[current_komp]['realisasi']:
-                        component_metrics[current_komp] = {
-                            "pagu": pagu,
-                            "realisasi": realisasi_sub,
-                            "sisa": sisa_sub,
-                            "persen": (realisasi_sub / pagu * 100) if pagu > 0 else 0
-                        }
-                elif lvl == 'Sub Komponen':
-                    if current_komp:
-                        if current_komp not in sub_component_realisasi:
-                            sub_component_realisasi[current_komp] = {}
-                        if is_outstanding_file or uraian not in sub_component_realisasi[current_komp] or realisasi_sub > sub_component_realisasi[current_komp].get(uraian, 0):
-                            if realisasi_sub > 0:
-                                sub_component_realisasi[current_komp][uraian] = realisasi_sub
-
-        if is_outstanding_file:
-            satker_row = df_lra[df_lra['Level'].astype(str).str.strip() == 'Satker']
-            if not satker_row.empty:
-                satker_summary["pagu"] = float(satker_row['Pagu'].values[0] or 0)
-                satker_summary["realisasi"] = float(satker_row['Total Realisasi'].values[0] or 0)
-                satker_summary["sisa"] = float(satker_row['Sisa'].values[0] or 0)
-            
-            detail_rows = df_lra[df_lra['Level'].astype(str).str.strip() == 'Detail']
-            gup_sum = pd.to_numeric(detail_rows['GUP'], errors='coerce').fillna(0).sum()
-            spm_sum = pd.to_numeric(detail_rows['SPM'], errors='coerce').fillna(0).sum()
-            verif_sum = pd.to_numeric(detail_rows['Verifikasi'], errors='coerce').fillna(0).sum()
-            satker_summary["outstanding"] = gup_sum + spm_sum + verif_sum
-
-        if not bulan_file and not is_outstanding_file:
-            continue
-            
+        current_komp = ""
         cur_komp, cur_sub, cur_akun = "GLOBAL", "GLOBAL", "GLOBAL"
         
-        for index, row in df_lra.iterrows():
-            lvl = str(row.get('Level')).strip()
-            uraian = str(row.get('Kode / Uraian', '')).strip()
+        for _, row in df_lra.iterrows():
+            lvl = str(row.get(level_col, '')).strip() if level_col else ''
             
-            realisasi = row.get('Total Realisasi', 0)
-            try: realisasi = float(realisasi)
-            except: realisasi = 0
-            if pd.isna(realisasi): realisasi = 0
-                
-            val_gup = float(row.get('GUP') or 0) if pd.notna(row.get('GUP')) else 0.0
-            val_spm = float(row.get('SPM') or 0) if pd.notna(row.get('SPM')) else 0.0
-            val_verifikasi = float(row.get('Verifikasi') or 0) if pd.notna(row.get('Verifikasi')) else 0.0
-            outstanding_val = val_gup + val_spm + val_verifikasi
-                
-            if lvl == 'Komponen':
-                match = re.search(r'(\d{3})\s*-', uraian)
+            uraian_val = ""
+            for c in df_lra.columns:
+                c_up = str(c).upper()
+                if 'URAIAN' in c_up or 'KODE' in c_up or 'DESKRIPSI' in c_up:
+                    val_c = str(row.get(c, '')).strip()
+                    if val_c and val_c != 'nan':
+                        uraian_val = val_c
+                        break
+            if not uraian_val:
+                for c in df_lra.columns[:4]:
+                    val_c = str(row.get(c, '')).strip()
+                    if val_c and val_c != 'nan':
+                        uraian_val = val_c
+                        break
+            
+            def safe_float(val):
+                try:
+                    if pd.isna(val): return 0.0
+                    return float(val)
+                except:
+                    return 0.0
+
+            pagu = safe_float(row.get(col_upper_map.get('PAGU', ''), 0))
+            realisasi_sub = safe_float(row.get(col_upper_map.get('TOTAL REALISASI', col_upper_map.get('REALISASI', '')), 0))
+            sisa_sub = safe_float(row.get(col_upper_map.get('SISA', ''), 0))
+            
+            if 'komponen' in lvl.lower() or (uraian_val and re.search(r'^\d{3}\s*-', uraian_val)):
+                match = re.search(r'(\d{3})\s*-', uraian_val)
                 if match: cur_komp = match.group(1)
+                current_komp = uraian_val
+                component_summary[current_komp] = pagu
+                if realisasi_sub > component_metrics.get(current_komp, {}).get('realisasi', 0):
+                    component_metrics[current_komp] = {
+                        "pagu": pagu,
+                        "realisasi": realisasi_sub,
+                        "sisa": sisa_sub,
+                        "persen": (realisasi_sub / pagu * 100) if pagu > 0 else 0
+                    }
                 cur_sub, cur_akun = "GLOBAL", "GLOBAL"
-            elif lvl == 'Sub Komponen':
-                match = re.search(r'([A-Z])\s*-', uraian)
+            elif 'sub komponen' in lvl.lower() or (uraian_val and re.match(r'^[A-Z]\.?\s*-', uraian_val)):
+                match = re.search(r'([A-Z])\s*-', uraian_val)
                 if match: cur_sub = match.group(1)
+                if current_komp:
+                    if current_komp not in sub_component_realisasi:
+                        sub_component_realisasi[current_komp] = {}
+                    if realisasi_sub > sub_component_realisasi[current_komp].get(uraian_val, 0):
+                        if realisasi_sub > 0:
+                            sub_component_realisasi[current_komp][uraian_val] = realisasi_sub
                 cur_akun = "GLOBAL"
-            elif lvl == 'Akun':
-                match = re.search(r'(\d{6})\s*-', uraian)
+            elif 'akun' in lvl.lower() or (uraian_val and re.search(r'^\d{6}\s*-', uraian_val)):
+                match = re.search(r'(\d{6})\s*-', uraian_val)
                 if match: cur_akun = match.group(1)
             
+            if 'satker' in lvl.lower() or ('satker' in str(uraian_val).lower()):
+                satker_summary["pagu"] = pagu
+                satker_summary["realisasi"] = realisasi_sub
+                satker_summary["sisa"] = sisa_sub
+
+            val_gup = safe_float(row.get(col_upper_map.get('GUP', ''), 0))
+            val_spm = safe_float(row.get(col_upper_map.get('SPM', ''), 0))
+            val_verifikasi = safe_float(row.get(col_upper_map.get('VERIFIKASI', ''), 0))
+            outstanding_val = val_gup + val_spm + val_verifikasi
+
             kamar_unik = f"{cur_komp}_{cur_sub}_{cur_akun}"
             if kamar_unik not in data_realisasi: 
                 data_realisasi[kamar_unik] = {}
                 
-            if pd.notna(uraian) and uraian not in ['nan', '']:
-                norm_lra = normalize_text(uraian)
+            if uraian_val and uraian_val not in ['nan', '']:
+                norm_lra = normalize_text(uraian_val)
                 
                 if norm_lra not in data_realisasi[kamar_unik]:
-                    data_realisasi[kamar_unik][norm_lra] = {b: 0 for b in list_semua_bulan}
-                    data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] = 0
+                    data_realisasi[kamar_unik][norm_lra] = {b: 0.0 for b in list_semua_bulan}
+                    data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] = 0.0
                 
-                if bulan_file:
-                    data_realisasi[kamar_unik][norm_lra][bulan_file] += realisasi
+                # Ekstraksi langsung dari kolom bulan jika tersedia di file LRA
+                if has_monthly_cols:
+                    for b in list_semua_bulan:
+                        col_name = col_upper_map.get(b)
+                        if col_name:
+                            m_val = safe_float(row.get(col_name, 0))
+                            data_realisasi[kamar_unik][norm_lra][b] += m_val
                 
-                if is_outstanding_file:
-                    data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] += outstanding_val
+                data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] += outstanding_val
+                satker_summary["outstanding"] += outstanding_val
                 
     return data_realisasi, satker_summary, monthly_totals, component_summary, component_metrics, sub_component_realisasi
 
@@ -565,7 +549,7 @@ if file_rab and file_lra_list:
                 st.write("Menyelaraskan dan memodifikasi template RAB...")
                 output_excel, data_ditemukan, df_preview = process_rab_lra(file_rab, data_realisasi, list_semua_bulan)
                 
-                # PERBAIKAN UTAMA: Hitung monthly_totals secara akurat langsung dari baris detail RAB yang berhasil diselaraskan (df_preview)
+                # AMBIL TOTAL BULANAN SECARA AKURAT DARI HASIL OLAHAN RAB YANG BERHASIL DISELARASKAN (df_preview)
                 if not df_preview.empty:
                     monthly_totals = {b: df_preview[b].sum() if b in df_preview.columns else 0.0 for b in list_semua_bulan}
                 

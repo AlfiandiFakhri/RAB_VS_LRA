@@ -99,6 +99,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
     data_realisasi = {}
     satker_summary = {"pagu": 0, "realisasi": 0, "sisa": 0, "outstanding": 0}
     monthly_totals = {b: 0 for b in list_semua_bulan}
+    component_summary = {} # Untuk menyimpan Pagu per Komponen langsung dari LRA All Periode
     
     for uploaded_lra in file_lra_list:
         uploaded_lra.seek(0)
@@ -149,6 +150,16 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 satker_summary["realisasi"] = float(satker_row['Total Realisasi'].values[0] or 0)
                 satker_summary["sisa"] = float(satker_row['Sisa'].values[0] or 0)
             
+            # Ekstrak Pagu Komponen langsung dari LRA All Periode (Level Komponen)
+            komp_rows = df_lra[df_lra['Level'].astype(str).str.strip() == 'Komponen']
+            for _, k_row in komp_rows.iterrows():
+                k_uraian = str(k_row.get('Kode / Uraian', ''))
+                match_k = re.search(r'(\d{3})\s*-', k_uraian)
+                if match_k:
+                    k_id = match_k.group(1)
+                    k_pagu = float(k_row.get('Pagu') or 0)
+                    component_summary[k_id] = k_pagu
+
             detail_rows = df_lra[df_lra['Level'].astype(str).str.strip() == 'Detail']
             gup_sum = pd.to_numeric(detail_rows['GUP'], errors='coerce').fillna(0).sum()
             spm_sum = pd.to_numeric(detail_rows['SPM'], errors='coerce').fillna(0).sum()
@@ -204,7 +215,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 if is_outstanding_file:
                     data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] += outstanding_val
                 
-    return data_realisasi, satker_summary, monthly_totals
+    return data_realisasi, satker_summary, monthly_totals, component_summary
 
 def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     wb = load_workbook(file_rab)
@@ -375,7 +386,7 @@ if file_rab and file_lra_list:
         try:
             with st.status("Sedang memproses dokumen dan menyusun ringkasan...", expanded=True) as status:
                 st.write("Mengekstrak data dari seluruh LRA (Realisasi & Outstanding)...")
-                data_realisasi, satker_summary, monthly_totals = parse_lra_files(file_lra_list, list_semua_bulan)
+                data_realisasi, satker_summary, monthly_totals, component_summary = parse_lra_files(file_lra_list, list_semua_bulan)
                 
                 st.write("Menyelaraskan dan memodifikasi template RAB...")
                 output_excel, data_ditemukan, df_preview = process_rab_lra(file_rab, data_realisasi, list_semua_bulan)
@@ -415,26 +426,37 @@ if file_rab and file_lra_list:
 
             with col_chart2:
                 st.markdown("### 🥧 Rincian Proporsi Pagu per Komponen")
-                if not df_preview.empty:
-                    df_comp = df_preview.groupby("Komponen")["Pagu"].sum().reset_index()
-                    # Filter hanya komponen yang memiliki Pagu > 0
-                    df_comp = df_comp[df_comp["Pagu"] > 0]
+                
+                # Gunakan data komponen resmi dari File LRA All Periode
+                if component_summary:
+                    comp_labels = [f"Komponen {k}" for k in component_summary.keys()]
+                    comp_values = list(component_summary.values())
                     
-                    if not df_comp.empty:
+                    if sum(comp_values) > 0:
                         fig, ax = plt.subplots(figsize=(5, 5))
-                        ax.pie(
-                            df_comp['Pagu'], 
-                            labels=[f"Komponen {k}" for k in df_comp['Komponen']], 
-                            autopct='%1.1f%%', 
+                        
+                        # Fungsi kustom agar label menampilkan Persentase sekaligus Nominal Rupiah
+                        def make_autopct(values):
+                            def my_autopct(pct):
+                                total = sum(values)
+                                val = int(round(pct * total / 100.0))
+                                return f"{pct:.1f}%\n(Rp {val:,.0f})"
+                            return my_autopct
+
+                        wedges, texts, autotexts = ax.pie(
+                            comp_values, 
+                            labels=comp_labels, 
+                            autopct=make_autopct(comp_values), 
                             startangle=90,
-                            colors=plt.cm.Pastel1.colors
+                            colors=plt.cm.Pastel1.colors,
+                            textprops=dict(color="black", fontsize=9)
                         )
                         ax.axis('equal')
                         st.pyplot(fig)
                     else:
-                        st.info("Tidak ada data komponen dengan pagu > 0.")
+                        st.info("Nilai pagu komponen bernilai 0.")
                 else:
-                    st.info("Data komponen belum tersedia.")
+                    st.info("Data komponen LRA belum tersedia.")
 
             with st.expander("🔍 Pratinjau & Filter Data Konsolidasi", expanded=False):
                 if not df_preview.empty:

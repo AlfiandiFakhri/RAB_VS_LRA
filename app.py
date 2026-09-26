@@ -9,7 +9,7 @@ from copy import copy
 
 st.set_page_config(page_title="RAB vs LRA Generator", layout="wide")
 st.title("📊LAPORAN")
-st.markdown("RAB VS LRA")
+st.markdown("RAB VS LRA (Multi-Bulan Januari - Desember)")
 
 def normalize_text(text):
     t = str(text)
@@ -44,71 +44,84 @@ col1, col2 = st.columns(2)
 with col1:
     file_rab = st.file_uploader("1. Upload Excel RAB", type=['xlsx', 'xls'], key="rab")
 with col2:
-    file_lra = st.file_uploader("2. Upload Excel LRA", type=['xlsx', 'xls'], key="lra")
+    # Mengizinkan upload banyak file LRA sekaligus (Januari s.d Desember)
+    file_lra_list = st.file_uploader("2. Upload Excel LRA (Bisa pilih banyak file: Jan - Des)", type=['xlsx', 'xls'], accept_multiple_files=True, key="lra")
 
-if file_rab and file_lra:
+if file_rab and file_lra_list:
     if st.button("🚀 Proses & Buat Laporan", type="primary"):
-        with st.spinner("Memproses LRA dan mendeteksi bulan aktif..."):
+        with st.spinner("Memproses seluruh data LRA (Januari - Desember)..."):
             try:
-                # ==========================================
-                # 0. DETEKSI BULAN DARI HEADER LRA (Contoh: "MODE SP2D: FEBRUARI")
-                # ==========================================
-                # Baca beberapa baris pertama tanpa skiprows untuk mencari teks "MODE SP2D" atau nama bulan
-                df_raw = pd.read_excel(file_lra, header=None, nrows=10)
-                bulan_aktif = "JANUARI" # Default jika tidak ketemu
-                
                 list_semua_bulan = [
                     'JANUARI', 'FEBRUARI', 'MARET', 'APRIL', 'MEI', 'JUNI', 
                     'JULI', 'AGUSTUS', 'SEPTEMBER', 'OKTOBER', 'NOVEMBER', 'DESEMBER'
                 ]
                 
-                for r in range(len(df_raw)):
-                    row_text = " ".join(str(val) for val in df_raw.iloc[r].values if pd.notna(val)).upper()
-                    if "SP2D" in row_text or "BULAN" in row_text or "MODE" in row_text:
-                        for b in list_semua_bulan:
-                            if b in row_text:
-                                bulan_aktif = b
-                                break
-                
-                st.info(f"📅 Bulan terdeteksi dari LRA: **{bulan_aktif}**")
-
-                # ==========================================
-                # 1. BACA LRA
-                # ==========================================
-                df_lra = pd.read_excel(file_lra, skiprows=5)
+                # Struktur data_realisasi: { kamar_unik: { norm_lra: { 'JANUARI': val, 'FEBRUARI': val, ... } } }
                 data_realisasi = {}
                 
-                cur_komp = "GLOBAL"
-                cur_sub = "GLOBAL"
-                cur_akun = "GLOBAL"
-                
-                for index, row in df_lra.iterrows():
-                    lvl = str(row.get('Level')).strip()
-                    uraian = str(row.get('Kode / Uraian', '')).strip()
-                    realisasi = row.get('Total Realisasi', 0)
-                    if pd.isna(realisasi): realisasi = 0
-                        
-                    if lvl == 'Komponen':
-                        match = re.search(r'(\d{3})\s*-', uraian)
-                        if match: cur_komp = match.group(1)
-                        cur_sub = "GLOBAL"
-                        cur_akun = "GLOBAL"
-                    elif lvl == 'Sub Komponen':
-                        match = re.search(r'([A-Z])\s*-', uraian)
-                        if match: cur_sub = match.group(1)
-                        cur_akun = "GLOBAL"
-                    elif lvl == 'Akun':
-                        match = re.search(r'(\d{6})\s*-', uraian)
-                        if match: cur_akun = match.group(1)
+                # Loop setiap file LRA yang di-upload oleh pengguna
+                for uploaded_lra in file_lra_list:
+                    # Deteksi bulan dari file LRA (misal dari teks "MODE SP2D: FEBRUARI" atau nama file)
+                    df_raw = pd.read_excel(uploaded_lra, header=None, nrows=10)
+                    bulan_file = None
                     
-                    kamar_unik = f"{cur_komp}_{cur_sub}_{cur_akun}"
-                    if kamar_unik not in data_realisasi: data_realisasi[kamar_unik] = {}
+                    # Cek di dalam isi file
+                    for r in range(len(df_raw)):
+                        row_text = " ".join(str(val) for val in df_raw.iloc[r].values if pd.notna(val)).upper()
+                        for b in list_semua_bulan:
+                            if b in row_text:
+                                bulan_file = b
+                                break
+                        if bulan_file: break
+                    
+                    # Jika tidak ketemu di isi file, cek dari nama file
+                    if not bulan_file:
+                        fname_upper = uploaded_lra.name.upper()
+                        for b in list_semua_bulan:
+                            if b in fname_upper:
+                                bulan_file = b
+                                break
+                    
+                    if not bulan_file:
+                        continue # Lewati jika bulan tidak terdeteksi
+                    
+                    # Baca data LRA mulai baris ke-6 (skipsrows=5)
+                    df_lra = pd.read_excel(uploaded_lra, skiprows=5)
+                    
+                    cur_komp = "GLOBAL"
+                    cur_sub = "GLOBAL"
+                    cur_akun = "GLOBAL"
+                    
+                    for index, row in df_lra.iterrows():
+                        lvl = str(row.get('Level')).strip()
+                        uraian = str(row.get('Kode / Uraian', '')).strip()
+                        realisasi = row.get('Total Realisasi', 0)
+                        if pd.isna(realisasi): realisasi = 0
+                            
+                        if lvl == 'Komponen':
+                            match = re.search(r'(\d{3})\s*-', uraian)
+                            if match: cur_komp = match.group(1)
+                            cur_sub = "GLOBAL"
+                            cur_akun = "GLOBAL"
+                        elif lvl == 'Sub Komponen':
+                            match = re.search(r'([A-Z])\s*-', uraian)
+                            if match: cur_sub = match.group(1)
+                            cur_akun = "GLOBAL"
+                        elif lvl == 'Akun':
+                            match = re.search(r'(\d{6})\s*-', uraian)
+                            if match: cur_akun = match.group(1)
                         
-                    if pd.notna(uraian) and uraian != 'nan' and uraian != '':
-                        norm_lra = normalize_text(uraian)
-                        if norm_lra not in data_realisasi[kamar_unik]:
-                            data_realisasi[kamar_unik][norm_lra] = []
-                        data_realisasi[kamar_unik][norm_lra].append(realisasi)
+                        kamar_unik = f"{cur_komp}_{cur_sub}_{cur_akun}"
+                        if kamar_unik not in data_realisasi: 
+                            data_realisasi[kamar_unik] = {}
+                            
+                        if pd.notna(uraian) and uraian != 'nan' and uraian != '':
+                            norm_lra = normalize_text(uraian)
+                            if norm_lra not in data_realisasi[kamar_unik]:
+                                data_realisasi[kamar_unik][norm_lra] = {b: 0 for b in list_semua_bulan}
+                            
+                            # Masukkan nilai realisasi ke bulan yang sesuai untuk uraian tersebut
+                            data_realisasi[kamar_unik][norm_lra][bulan_file] += realisasi
 
                 # ==========================================
                 # 2. BACA & MODIFIKASI RAB 
@@ -189,15 +202,18 @@ if file_rab and file_lra:
                         
                         for kamar in kamar_opsi:
                             if len(norm_rab) > 2 and kamar in data_realisasi:
-                                for key, q in data_realisasi[kamar].items():
-                                    if len(q) > 0 and match_texts_smart(key, norm_rab):
+                                for key, dict_bulanan in data_realisasi[kamar].items():
+                                    if match_texts_smart(key, norm_rab):
                                         matched_key = (kamar, key)
                                         break
                             if matched_key: break
                         
                         if matched_key:
                             kamar_ketemu, key_ketemu = matched_key
-                            nilai_realisasi = data_realisasi[kamar_ketemu][key_ketemu].pop(0)
+                            dict_bulanan = data_realisasi[kamar_ketemu].pop(key_ketemu) # Ambil dan hapus agar tidak double-match
+                            
+                            # Hitung total dari seluruh bulan yang terkumpul
+                            total_realisasi_val = sum(dict_bulanan.values())
                             
                             target_row = row_idx
                             for r_cek in range(row_idx, min(row_idx + 6, max_row + 1)):
@@ -208,18 +224,18 @@ if file_rab and file_lra:
                             
                             baris_terpakai.add(target_row)
                             
+                            # 1. Isi Kolom TOTAL Realisasi (Kolom 20) & SISA (Kolom 21)
                             cell_realisasi = ws.cell(row=target_row, column=20)
                             cell_sisa = ws.cell(row=target_row, column=21)
                             
-                            cell_realisasi.value = nilai_realisasi
+                            cell_realisasi.value = total_realisasi_val
                             cell_sisa.value = f"=S{target_row}-T{target_row}"
                             
-                            # Masukkan nilai ke kolom bulan yang sesuai (misal: kolom FEBRUARI)
-                            # Indeks kolom bulan mulai dari kolom ke-22 (Kolom 22 = Januari, dst.)
-                            idx_bulan = list_semua_bulan.index(bulan_aktif)
-                            col_target_bulan = 22 + idx_bulan
-                            cell_Bulan = ws.cell(row=target_row, column=col_target_bulan)
-                            cell_Bulan.value = nilai_realisasi
+                            # 2. Isi Kolom Bulanan (Kolom 22 s.d 33 untuk Januari s.d Desember)
+                            for idx_b, b_name in enumerate(list_semua_bulan):
+                                col_target_bulan = 22 + idx_b
+                                cell_bulan = ws.cell(row=target_row, column=col_target_bulan)
+                                cell_bulan.value = dict_bulanan[b_name]
 
                             data_ref = ws.cell(row=target_row, column=19)
                             for c_idx in range(20, 34):
@@ -236,12 +252,12 @@ if file_rab and file_lra:
                 wb.save(output)
                 output.seek(0)
                 
-                st.success(f"🎉 SUKSES! Berhasil menyelaraskan {data_ditemukan} baris ke kolom {bulan_aktif}.")
+                st.success(f"🎉 SUKSES! Berhasil menyelaraskan {data_ditemukan} baris dengan rincian lengkap dari file LRA bulanan.")
                 
                 st.download_button(
                     label="⬇️ Download Laporan Akhir (.xlsx)",
                     data=output,
-                    file_name="LAPORAN_RAB_LRA_SEJAJAR_SEMPURNA.xlsx",
+                    file_name="LAPORAN_RAB_LRA_LENGKAP_JAN_DES.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 

@@ -545,7 +545,6 @@ if file_rab and file_lra_list:
                 st.write("Menyelaraskan dan memodifikasi template RAB...")
                 output_excel, data_ditemukan, df_preview = process_rab_lra(file_rab, data_realisasi, list_semua_bulan)
                 
-                # AMBIL TOTAL BULANAN SECARA AKURAT DARI HASIL OLAHAN RAB YANG BERHASIL DISELARASKAN (df_preview)
                 if not df_preview.empty:
                     monthly_totals = {b: df_preview[b].sum() if b in df_preview.columns else 0.0 for b in list_semua_bulan}
                 
@@ -576,16 +575,21 @@ if file_rab and file_lra_list:
             if component_metrics:
                 st.markdown("---")
                 st.markdown("### 🏷️ Ringkasan Per Komponen")
-                comp_cols = st.columns(2)
                 
-                for idx, (komp_name, metrics) in enumerate(component_metrics.items()):
-                    with comp_cols[idx]:
-                        st.markdown(f"**{komp_name}**")
-                        sub_c1, sub_c2 = st.columns(2)
-                        sub_c1.metric("Pagu", f"Rp {metrics['pagu']:,.0f}")
-                        sub_c1.metric("Realisasi", f"Rp {metrics['realisasi']:,.0f}")
-                        sub_c2.metric("Sisa", f"Rp {metrics['sisa']:,.0f}")
-                        sub_c2.metric("Penyerapan", f"{metrics['persen']:.2f}%")
+                # PERBAIKAN: Render per komponen secara dinamis (2 komponen per baris) agar aman berapapun jumlah komponennya
+                komp_metric_items = list(component_metrics.items())
+                for i in range(0, len(komp_metric_items), 2):
+                    comp_cols = st.columns(2)
+                    for j in range(2):
+                        if i + j < len(komp_metric_items):
+                            komp_name, metrics = komp_metric_items[i + j]
+                            with comp_cols[j]:
+                                st.markdown(f"**{komp_name}**")
+                                sub_c1, sub_c2 = st.columns(2)
+                                sub_c1.metric("Pagu", f"Rp {metrics['pagu']:,.0f}")
+                                sub_c1.metric("Realisasi", f"Rp {metrics['realisasi']:,.0f}")
+                                sub_c2.metric("Sisa", f"Rp {metrics['sisa']:,.0f}")
+                                sub_c2.metric("Penyerapan", f"{metrics['persen']:.2f}%")
 
             st.markdown("---")
             st.markdown("### 📊 Tren Penyerapan Bulanan")
@@ -631,7 +635,6 @@ if file_rab and file_lra_list:
             if sub_component_realisasi:
                 komp_keys = list(sub_component_realisasi.keys())
                 
-                # PERBAIKAN: Render kolom secara dinamis per baris (2 komponen per baris) agar aman berapapun jumlah komponennya
                 for i in range(0, len(komp_keys), 2):
                     row_cols = st.columns(2)
                     for j in range(2):

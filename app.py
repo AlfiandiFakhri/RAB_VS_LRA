@@ -3,14 +3,17 @@ import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 from openpyxl.utils import get_column_letter
+from openpyxl.formatting.rule import CellIsRule
 import io
 import re
 from copy import copy
+from pptx import Presentation
+from pptx.util import Inches, Pt
 
 # ==========================================
 # KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="RAB vs LRA Generator", layout="wide", page_icon="📊")
+st.set_page_config(page_title="RAB vs LRA Executive Generator", layout="wide", page_icon="📊")
 
 def normalize_text(text):
     t = str(text)
@@ -42,7 +45,7 @@ def match_texts_smart(t1, t2):
     return False
 
 # ==========================================
-# FUNGSI PEMROSESAN DATA
+# FUNGSI PEMROSESAN DATA LRA & RAB
 # ==========================================
 def parse_lra_files(file_lra_list, list_semua_bulan):
     data_realisasi = {}
@@ -52,12 +55,10 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
         bulan_file = None
         is_outstanding_file = False
         
-        # Cek dari NAMA FILE
         fname_upper = uploaded_lra.name.upper().replace(" ", "")
         if "SEMUALEVEL" in fname_upper or "ALLPERIODE" in fname_upper or "SEMUAPERIODE" in fname_upper:
             is_outstanding_file = True
 
-        # Cek dari ISI FILE
         for r in range(len(df_raw)):
             row_text_raw = " ".join(str(val) for val in df_raw.iloc[r].values if pd.notna(val)).upper()
             row_text_clean = row_text_raw.replace(" ", "")
@@ -78,7 +79,6 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                     
         df_lra = pd.read_excel(uploaded_lra, skiprows=5)
         
-        # Failsafe Lapis 3
         kolom_lra = [str(col).upper() for col in df_lra.columns]
         ada_gup = any('GUP' in col for col in kolom_lra)
         ada_spm = any('SPM' in col for col in kolom_lra)
@@ -108,15 +108,10 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 
                 try: val_gup = float(val_gup)
                 except: val_gup = 0
-                if pd.isna(val_gup): val_gup = 0
-                
                 try: val_spm = float(val_spm)
                 except: val_spm = 0
-                if pd.isna(val_spm): val_spm = 0
-                
                 try: val_verifikasi = float(val_verifikasi)
                 except: val_verifikasi = 0
-                if pd.isna(val_verifikasi): val_verifikasi = 0
                 
                 outstanding_val = val_gup + val_spm + val_verifikasi
                 
@@ -143,7 +138,6 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                     data_realisasi[kamar_unik][norm_lra] = {b: 0 for b in list_semua_bulan}
                     data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] = 0
                 
-                # Jika file bulanan, simpan ke bulannya. Nilainya nanti di-SUM.
                 if bulan_file:
                     data_realisasi[kamar_unik][norm_lra][bulan_file] += realisasi
                 
@@ -159,10 +153,12 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     baris_header = 13 
     baris_mulai_data = 14
     
+    # Penambahan Kolom PERSENTASE (%)
     kolom_baru = [
         "TOTAL Realisasi", "SISA", "OUT STANDING", 
         "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", 
-        "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER", "KETERANGAN"
+        "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER", 
+        "PENYERAPAN (%)", "KETERANGAN"
     ]
     
     header_ref = ws.cell(row=baris_header, column=19)
@@ -171,8 +167,8 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     warna_hijau = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
     warna_kuning = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
     warna_orange = PatternFill(start_color="FCD5B4", end_color="FCD5B4", fill_type="solid") 
+    warna_biru_muda = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
     
-    # 1. Buat Header Baru
     for i, nama_kolom in enumerate(kolom_baru):
         cell = ws.cell(row=baris_header, column=start_col + i)
         cell.value = nama_kolom
@@ -184,20 +180,25 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
         if nama_kolom == "TOTAL Realisasi": cell.fill = warna_hijau
         elif nama_kolom == "SISA": cell.fill = warna_kuning
         elif nama_kolom == "OUT STANDING": cell.fill = warna_orange
+        elif nama_kolom == "PENYERAPAN (%)": cell.fill = warna_biru_muda
         else:
             if header_ref.has_style: cell.fill = copy(header_ref.fill)
 
-    # Atur lebar kolom
-    ws.column_dimensions[get_column_letter(20)].width = 20.5
-    ws.column_dimensions[get_column_letter(21)].width = 18.2 
-    ws.column_dimensions[get_column_letter(22)].width = 18.2 
-    for c_idx in range(23, 35): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0
-    ws.column_dimensions[get_column_letter(35)].width = 35.0
+    # Lebar Kolom
+    ws.column_dimensions[get_column_letter(20)].width = 20.5 # Total Realisasi
+    ws.column_dimensions[get_column_letter(21)].width = 18.2 # Sisa
+    ws.column_dimensions[get_column_letter(22)].width = 18.2 # Outstanding
+    for c_idx in range(23, 35): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 # Bulan Jan-Des
+    ws.column_dimensions[get_column_letter(35)].width = 16.0 # Penyerapan %
+    ws.column_dimensions[get_column_letter(36)].width = 35.0 # Keterangan
 
     max_row = ws.max_row
     data_ditemukan = 0
     rab_komp, rab_sub, rab_akun = "GLOBAL", "GLOBAL", "GLOBAL"
     baris_terpakai = set()
+
+    # Struktur penampung untuk Dashboard Web
+    summary_preview = []
 
     for row_idx in range(baris_mulai_data, max_row + 1):
         kode_col = str(ws.cell(row=row_idx, column=2).value).strip()
@@ -237,7 +238,6 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
             
             if matched_key:
                 kamar_ketemu, key_ketemu = matched_key
-                
                 dict_bulanan = data_realisasi[kamar_ketemu].pop(key_ketemu) 
                 nilai_outstanding = dict_bulanan.pop('OUTSTANDING', 0)
                 
@@ -250,36 +250,49 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
                 
                 baris_terpakai.add(target_row)
                 
-                cell_realisasi = ws.cell(row=target_row, column=20)   # Kolom T (TOTAL Realisasi)
-                cell_sisa = ws.cell(row=target_row, column=21)        # Kolom U (SISA)
-                cell_outstanding = ws.cell(row=target_row, column=22) # Kolom V (OUT STANDING)
+                cell_realisasi = ws.cell(row=target_row, column=20)   # Kolom T
+                cell_sisa = ws.cell(row=target_row, column=21)        # Kolom U
+                cell_outstanding = ws.cell(row=target_row, column=22) # Kolom V
+                cell_persen = ws.cell(row=target_row, column=35)      # Kolom AI
                 
-                # 1. Masukkan nilai OUT STANDING
                 cell_outstanding.value = nilai_outstanding
                 
-                # 2. Masukkan nilai Bulanan (W = Jan s/d AH = Des)
+                row_bulanan_val = {}
                 for idx_b, b_name in enumerate(list_semua_bulan):
                     col_target_bulan = 23 + idx_b 
                     cell_bulan = ws.cell(row=target_row, column=col_target_bulan)
-                    cell_bulan.value = dict_bulanan[b_name]
-                
-                # =========================================================================
-                # 3. PERBAIKAN RUMUS OTOMATIS EXCEL
-                # TOTAL REALISASI (T) = SUM(Jan:Des) + OUT STANDING(V)
-                # SISA (U)            = PAGU(S) - TOTAL REALISASI(T)
-                # =========================================================================
+                    val_b = dict_bulanan[b_name]
+                    cell_bulan.value = val_b
+                    row_bulanan_val[b_name] = val_b
+
+                # Rumus Excel untuk Total Realisasi, Sisa, dan Penyerapan %
                 cell_realisasi.value = f"=SUM(W{target_row}:AH{target_row})+V{target_row}"
                 cell_sisa.value = f"=S{target_row}-T{target_row}"
+                cell_persen.value = f"=T{target_row}/S{target_row}"
+                cell_persen.number_format = '0.0%'
+
+                # Simpan untuk data preview & dashboard
+                pagu_val = ws.cell(row=target_row, column=19).value or 0
+                try: pagu_val = float(pagu_val)
+                except: pagu_val = 0
+                
+                summary_preview.append({
+                    "Komponen": rab_komp,
+                    "Uraian": uraian_rab,
+                    "Pagu": pagu_val,
+                    "Outstanding": nilai_outstanding,
+                    **row_bulanan_val
+                })
 
                 data_ref = ws.cell(row=target_row, column=19)
-                
-                for c_idx in range(20, 36):
+                for c_idx in range(20, 37):
                     c = ws.cell(row=target_row, column=c_idx)
                     if data_ref.has_style:
                         c.font = copy(data_ref.font)
                         c.border = copy(data_ref.border)
                         c.alignment = copy(data_ref.alignment)
-                        c.number_format = copy(data_ref.number_format)
+                        if c_idx != 35: # Jangan timpa format persen
+                            c.number_format = copy(data_ref.number_format)
                 
                 data_ditemukan += 1
 
@@ -287,26 +300,62 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     wb.save(output)
     output.seek(0)
     
-    return output, data_ditemukan
+    return output, data_ditemukan, pd.DataFrame(summary_preview)
 
 # ==========================================
-# ANTARMUKA PENGGUNA (UI)
+# FUNGSI GENERATE POWERPOINT PRESENTASI
 # ==========================================
-st.title("📊 LAPORAN RAB VS LRA")
-st.markdown("**Konsolidasi Laporan Anggaran Multi-Bulan (Januari - Desember)**")
+def generate_pptx_presentation(metrics, monthly_totals):
+    prs = Presentation()
+    
+    # Slide 1: Judul
+    slide_layout = prs.slide_layouts[0]
+    slide = prs.slides.add_slide(slide_layout)
+    slide.shapes.title.text = "LAPORAN KONSOLIDASI ANGGARAN"
+    slide.placeholders[1].text = "Executive Summary RAB vs LRA Tahun 2026\nAsdep PIMEN - Kementerian Koperasi dan UKM"
+
+    # Slide 2: Ringkasan Metrik Utama
+    slide_layout = prs.slide_layouts[1]
+    slide = prs.slides.add_slide(slide_layout)
+    slide.shapes.title.text = "Ringkasan Kinerja Anggaran (Executive Metrics)"
+    
+    tf = slide.placeholders[1].text_frame
+    tf.text = f"• Total Pagu Anggaran : Rp {metrics['pagu']:,.0f}"
+    tf.add_paragraph().text = f"• Total Realisasi (incl. Outstanding) : Rp {metrics['realisasi']:,.0f}"
+    tf.add_paragraph().text = f"• Total Sisa Anggaran : Rp {metrics['sisa']:,.0f}"
+    tf.add_paragraph().text = f"• Rata-rata Tingkat Penyerapan : {metrics['persentase']:.2f}%"
+
+    # Slide 3: Catatan & Tren
+    slide = prs.slides.add_slide(slide_layout)
+    slide.shapes.title.text = "Catatan Strategis Pimpinan"
+    tf2 = slide.placeholders[1].text_frame
+    tf2.text = "• Konsolidasi data bersumber dari LRA bulanan (Januari - Desember) dan rekapitulasi All Periode."
+    tf2.add_paragraph().text = "• Nilai Outstanding (GUP + SPM + Verifikasi) telah diintegrasikan langsung ke dalam perhitungan penyerapan."
+    tf2.add_paragraph().text = "• Laporan siap digunakan sebagai bahan monitoring dan evaluasi penyerapan anggaran Triwulanan."
+
+    output = io.BytesIO()
+    prs.save(output)
+    output.seek(0)
+    return output
+
+# ==========================================
+# ANTARMUKA PENGGUNA (UI) STREAMLIT
+# ==========================================
+st.title("📊 EXECUTIVE RAB VS LRA GENERATOR")
+st.markdown("**Sistem Konsolidasi & Analisis Laporan Anggaran Multi-Bulan (Kementerian Koperasi dan UKM)**")
 st.divider()
 
 col1, col2 = st.columns(2)
 with col1:
-    st.info("Langkah 1: Masukkan File RAB")
-    file_rab = st.file_uploader("Upload Excel RAB", type=['xlsx', 'xls'], key="rab")
+    st.info("Langkah 1: Upload File RAB Utama")
+    file_rab = st.file_uploader("Pilih file Excel RAB", type=['xlsx', 'xls'], key="rab")
 with col2:
-    st.info("Langkah 2: Masukkan File LRA")
-    file_lra_list = st.file_uploader("Upload Excel LRA (Bisa pilih banyak file)", type=['xlsx', 'xls'], accept_multiple_files=True, key="lra")
+    st.info("Langkah 2: Upload Seluruh File LRA (Jan - Des + All Periode)")
+    file_lra_list = st.file_uploader("Pilih banyak file LRA sekaligus", type=['xlsx', 'xls'], accept_multiple_files=True, key="lra")
 
 if file_rab and file_lra_list:
     st.divider()
-    if st.button("🚀 Proses & Buat Laporan", type="primary", use_container_width=True):
+    if st.button("🚀 Proses Konsolidasi & Buat Dashboard", type="primary", use_container_width=True):
         
         list_semua_bulan = [
             'JANUARI', 'FEBRUARI', 'MARET', 'APRIL', 'MEI', 'JUNI', 
@@ -314,25 +363,96 @@ if file_rab and file_lra_list:
         ]
         
         try:
-            with st.status("Sedang memproses dokumen...", expanded=True) as status:
-                
-                st.write("Mengekstrak data dari seluruh LRA (Realisasi & Outstanding)...")
+            with st.status("Sedang memproses dokumen dan menyelaraskan data...", expanded=True) as status:
+                st.write("Mengekstrak data realisasi bulanan dan outstanding...")
                 data_realisasi = parse_lra_files(file_lra_list, list_semua_bulan)
                 
-                st.write("Menyelaraskan dan memodifikasi template RAB...")
-                output_excel, data_ditemukan = process_rab_lra(file_rab, data_realisasi, list_semua_bulan)
+                st.write("Memodifikasi dan memasukkan rumus ke template RAB...")
+                output_excel, data_ditemukan, df_preview = process_rab_lra(file_rab, data_realisasi, list_semua_bulan)
                 
-                status.update(label="Proses Selesai!", state="complete", expanded=False)
+                status.update(label="Konsolidasi Selesai!", state="complete", expanded=False)
 
-            st.success(f"🎉 SUKSES! Berhasil menyelaraskan **{data_ditemukan} baris** data RAB dengan data LRA bulanan.")
+            st.success(f"🎉 Berhasil menyelaraskan **{data_ditemukan} baris** data anggaran!")
+            st.divider()
+
+            # ==========================================
+            # DASHBOARD EKSEKUTIF DI WEB
+            # ==========================================
+            st.subheader("📈 Dashboard Ringkasan Eksekutif")
             
-            st.download_button(
-                label="⬇️ Download Laporan Akhir (.xlsx)",
-                data=output_excel,
-                file_name="LAPORAN_RAB_LRA_LENGKAP_JAN_DES.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary"
-            )
+            # Hitung Metrik Global dari Preview
+            total_pagu_all = df_preview['Pagu'].sum() if not df_preview.empty else 0
+            total_out_all = df_preview['Outstanding'].sum() if not df_preview.empty else 0
+            
+            monthly_sums = {}
+            for b in list_semua_bulan:
+                if b in df_preview.columns:
+                    monthly_sums[b] = df_preview[b].sum()
+                else:
+                    monthly_sums[b] = 0
+            
+            total_realisasi_bulanan = sum(monthly_sums.values())
+            total_realisasi_incl_out = total_realisasi_bulanan + total_out_all
+            total_sisa_all = total_pagu_all - total_realisasi_incl_out
+            persen_nasional = (total_realisasi_incl_out / total_pagu_all * 100) if total_pagu_all > 0 else 0
+
+            # Tampilkan 4 Kartu Metrik
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("💰 Total Pagu Anggaran", f"Rp {total_pagu_all:,.0f}")
+            m2.metric("📉 Total Realisasi (+ Outstd)", f"Rp {total_realisasi_incl_out:,.0f}")
+            m3.metric("🟡 Sisa Anggaran", f"Rp {total_sisa_all:,.0f}")
+            m4.metric("📊 Tingkat Penyerapan", f"{persen_nasional:.2f}%")
+
+            st.markdown("---")
+
+            # Grafik Tren Bulanan
+            st.markdown("### 📊 Grafik Tren Penyerapan Anggaran Bulanan")
+            s_bulan = pd.Series(monthly_sums)
+            st.bar_chart(s_bulan)
+
+            # Data Preview & Filter
+            with st.expander("🔍 Pratinjau & Filter Data Konsolidasi (Preview Tabel)", expanded=False):
+                komponen_list = df_preview['Komponen'].unique() if not df_preview.empty else []
+                selected_komp = st.multiselect("Filter Berdasarkan Komponen:", options=komponen_list, default=komponen_list)
+                
+                if not df_preview.empty:
+                    df_filtered = df_preview[df_preview['Komponen'].isin(selected_komp)]
+                    st.dataframe(df_filtered, use_container_width=True)
+
+            st.divider()
+
+            # ==========================================
+            # TOMBOL DOWNLOAD (EXCEL & POWERPOINT)
+            # ==========================================
+            st.subheader("📥 Download Berkas Laporan Akhir")
+            
+            metrics_dict = {
+                "pagu": total_pagu_all,
+                "realisasi": total_realisasi_incl_out,
+                "sisa": total_sisa_all,
+                "persentase": persen_nasional
+            }
+            pptx_file = generate_pptx_presentation(metrics_dict, monthly_sums)
+
+            dl_col1, dl_col2 = st.columns(2)
+            with dl_col1:
+                st.download_button(
+                    label="⬇️ Download Laporan Excel (.xlsx)",
+                    data=output_excel,
+                    file_name="LAPORAN_RAB_LRA_LENGKAP_JAN_DES.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="primary",
+                    use_container_width=True
+                )
+            with dl_col2:
+                st.download_button(
+                    label="📊 Download Slide Presentasi Pimpinan (.pptx)",
+                    data=pptx_file,
+                    file_name="PRESENTASI_KINERJA_ANGGARAN_2026.pptx",
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    type="secondary",
+                    use_container_width=True
+                )
 
         except Exception as e:
             st.error(f"⚠️ Terjadi kesalahan pada saat pemrosesan: {e}")

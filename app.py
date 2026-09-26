@@ -111,8 +111,9 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     baris_header = 13 
     baris_mulai_data = 14
     
+    # === REVISI: Penambahan Kolom OUT STANDING ===
     kolom_baru = [
-        "TOTAL Realisasi", "SISA", 
+        "TOTAL Realisasi", "SISA", "OUT STANDING", 
         "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", 
         "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER", "KETERANGAN"
     ]
@@ -122,6 +123,7 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     
     warna_hijau = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
     warna_kuning = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+    warna_orange = PatternFill(start_color="FCD5B4", end_color="FCD5B4", fill_type="solid") # Warna untuk Out Standing
     
     # 1. Buat Header Baru
     for i, nama_kolom in enumerate(kolom_baru):
@@ -134,14 +136,16 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
         
         if nama_kolom == "TOTAL Realisasi": cell.fill = warna_hijau
         elif nama_kolom == "SISA": cell.fill = warna_kuning
+        elif nama_kolom == "OUT STANDING": cell.fill = warna_orange
         else:
             if header_ref.has_style: cell.fill = copy(header_ref.fill)
 
-    # Atur lebar kolom
-    ws.column_dimensions[get_column_letter(20)].width = 20.5
-    ws.column_dimensions[get_column_letter(21)].width = 18.2
-    for c_idx in range(22, 34): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0
-    ws.column_dimensions[get_column_letter(34)].width = 35.0
+    # Atur lebar kolom yang baru
+    ws.column_dimensions[get_column_letter(20)].width = 20.5 # Total Realisasi
+    ws.column_dimensions[get_column_letter(21)].width = 18.2 # Sisa
+    ws.column_dimensions[get_column_letter(22)].width = 18.2 # Out Standing
+    for c_idx in range(23, 35): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 # Bulan Jan-Des
+    ws.column_dimensions[get_column_letter(35)].width = 35.0 # Keterangan
 
     max_row = ws.max_row
     data_ditemukan = 0
@@ -200,20 +204,26 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
                 
                 baris_terpakai.add(target_row)
                 
-                # Isi Cell
+                # Mengisi Data ke Cell
                 cell_realisasi = ws.cell(row=target_row, column=20)
                 cell_sisa = ws.cell(row=target_row, column=21)
+                # cell_outstanding = ws.cell(row=target_row, column=22) # Kolom V
                 
                 cell_realisasi.value = total_realisasi_val
+                
+                # Rumus default SISA (Kolom Pagu (S) dikurangi Kolom Realisasi (T))
+                # Jika Outstanding (V) ikut memotong SISA, rumusnya ubah menjadi: f"=S{target_row}-T{target_row}-V{target_row}"
                 cell_sisa.value = f"=S{target_row}-T{target_row}"
                 
                 for idx_b, b_name in enumerate(list_semua_bulan):
-                    col_target_bulan = 22 + idx_b
+                    col_target_bulan = 23 + idx_b # Indeks bergeser +1 karena ada kolom Out Standing
                     cell_bulan = ws.cell(row=target_row, column=col_target_bulan)
                     cell_bulan.value = dict_bulanan[b_name]
 
                 data_ref = ws.cell(row=target_row, column=19)
-                for c_idx in range(20, 34):
+                
+                # Terapkan styling dari kolom S (19) ke semua kolom yang baru dibentuk (20 sampai 35)
+                for c_idx in range(20, 36):
                     c = ws.cell(row=target_row, column=c_idx)
                     if data_ref.has_style:
                         c.font = copy(data_ref.font)

@@ -49,6 +49,48 @@ def match_texts_smart(t1, t2):
         return True
     return False
 
+def get_row_pagu(ws, row_idx):
+    """Menghitung nilai pagu per baris detail secara akurat dari volume & biaya satuan"""
+    try:
+        f_val = ws.cell(row=row_idx, column=6).value
+        h_val = ws.cell(row=row_idx, column=8).value
+        r_val = ws.cell(row=row_idx, column=18).value
+        
+        def parse_val(v):
+            if isinstance(v, (int, float)): return float(v)
+            if isinstance(v, str) and v.startswith('='):
+                parts = v.lstrip('=').split('*')
+                nums = []
+                for p in parts:
+                    p = p.strip()
+                    try:
+                        nums.append(float(p))
+                    except:
+                        col_letter = ''.join([c for c in p if c.isalpha()])
+                        row_num = int(''.join([c for c in p if c.isdigit()]))
+                        col_idx = ord(col_letter.upper()) - 64
+                        cell_v = ws.cell(row=row_num, column=col_idx).value
+                        if isinstance(cell_v, (int, float)):
+                            nums.append(float(cell_v))
+                        else:
+                            nums.append(1.0)
+                res = 1.0
+                for n in nums: res *= n
+                return res
+            return 0.0
+            
+        vol1 = parse_val(f_val) if f_val is not None else 1.0
+        vol2 = parse_val(h_val) if h_val is not None else 1.0
+        biaya = parse_val(r_val) if r_val is not None else 0.0
+        
+        h_raw = ws.cell(row=row_idx, column=7).value
+        if h_raw is not None and isinstance(h_raw, str) and 'x' in h_raw.lower():
+            return vol1 * vol2 * biaya
+        else:
+            return vol1 * biaya
+    except:
+        return 0.0
+
 # ==========================================
 # FUNGSI PEMROSESAN DATA LRA & RAB
 # ==========================================
@@ -65,14 +107,12 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
         bulan_file = None
         is_outstanding_file = False
         
-        # 1. Cek Bulan dari NAMA FILE
         fname_upper = uploaded_lra.name.upper()
         for b in list_semua_bulan:
             if b in fname_upper:
                 bulan_file = b
                 break
 
-        # 2. Cek Bulan dari ISI FILE
         if not bulan_file:
             for r in range(len(df_raw)):
                 row_text_raw = " ".join(str(val) for val in df_raw.iloc[r].values if pd.notna(val)).upper()
@@ -82,7 +122,6 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                         break
                 if bulan_file: break
 
-        # 3. Deteksi File Outstanding / All Periode
         fname_clean = fname_upper.replace(" ", "")
         keyword_out = ["SEMUA", "LEVEL", "ALL", "PERIODE", "REKAP", "GUP"]
         if any(kw in fname_clean for kw in keyword_out) and not bulan_file:
@@ -279,10 +318,7 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
                 cell_realisasi.value = f"=SUM(W{target_row}:AH{target_row})+V{target_row}"
                 cell_sisa.value = f"=S{target_row}-T{target_row}"
 
-                pagu_val = ws.cell(row=target_row, column=19).value or 0
-                try: pagu_val = float(pagu_val)
-                except: pagu_val = 0
-
+                pagu_val = get_row_pagu(ws, target_row)
                 total_realisasi_row = sum(row_bulanan_val.values()) + nilai_outstanding
 
                 summary_preview.append({
@@ -388,7 +424,7 @@ if file_rab and file_lra_list:
                         c_pct = (c_pagu / tot_comp_pagu * 100) if tot_comp_pagu > 0 else 0
                         
                         st.markdown(f"**Komponen {c_id}** — Rp {c_pagu:,.0f} *({c_pct:.1f}%)*")
-                        st.progress(c_pct / 100.0)
+                        st.progress(c_pct / 100.0 if c_pct <= 100 else 1.0)
                 else:
                     st.info("Data komponen belum tersedia.")
 

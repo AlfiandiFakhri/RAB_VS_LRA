@@ -82,7 +82,6 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
         df_lra = pd.read_excel(uploaded_lra, skiprows=5)
         
         # Lapis 3: Failsafe (Kecerdasan Buatan Tambahan)
-        # Jika file tidak terdeteksi nama bulannya, tapi punya kolom GUP, SPM, Verifikasi, jadikan Outstanding
         kolom_lra = [str(col).upper() for col in df_lra.columns]
         ada_gup = any('GUP' in col for col in kolom_lra)
         ada_spm = any('SPM' in col for col in kolom_lra)
@@ -266,7 +265,10 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
                 cell_realisasi.value = total_realisasi_val
                 cell_outstanding.value = nilai_outstanding
                 
-                cell_sisa.value = f"=S{target_row}-T{target_row}"
+                # =========================================================================
+                # REVISI RUMUS: SISA = Pagu(S) - Total Realisasi(T) - Out Standing(V)
+                # =========================================================================
+                cell_sisa.value = f"=S{target_row}-T{target_row}-V{target_row}"
                 
                 for idx_b, b_name in enumerate(list_semua_bulan):
                     col_target_bulan = 23 + idx_b 

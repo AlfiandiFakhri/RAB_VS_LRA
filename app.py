@@ -103,14 +103,12 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
             is_outstanding_file = True
 
         if is_outstanding_file:
-            # Ambil langsung dari baris Satker untuk akurasi mutlak
             satker_row = df_lra[df_lra['Level'].astype(str).str.strip() == 'Satker']
             if not satker_row.empty:
                 satker_summary["pagu"] = float(satker_row['Pagu'].values[0] or 0)
                 satker_summary["realisasi"] = float(satker_row['Total Realisasi'].values[0] or 0)
                 satker_summary["sisa"] = float(satker_row['Sisa'].values[0] or 0)
             
-            # Hitung Outstanding presisi dari level Detail
             detail_rows = df_lra[df_lra['Level'].astype(str).str.strip() == 'Detail']
             gup_sum = pd.to_numeric(detail_rows['GUP'], errors='coerce').fillna(0).sum()
             spm_sum = pd.to_numeric(detail_rows['SPM'], errors='coerce').fillna(0).sum()
@@ -310,31 +308,6 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     
     return output, data_ditemukan, pd.DataFrame(summary_preview)
 
-def generate_pptx_presentation(metrics, monthly_totals):
-    if not HAS_PPTX:
-        return None
-    prs = Presentation()
-    
-    slide_layout = prs.slide_layouts[0]
-    slide = prs.slides.add_slide(slide_layout)
-    slide.shapes.title.text = "LAPORAN KONSOLIDASI ANGGARAN"
-    slide.placeholders[1].text = "Executive Summary RAB vs LRA Tahun 2026\nAsdep PIMEN - Kementerian Koperasi dan UKM"
-
-    slide_layout = prs.slide_layouts[1]
-    slide = prs.slides.add_slide(slide_layout)
-    slide.shapes.title.text = "Ringkasan Kinerja Anggaran (Executive Metrics)"
-    
-    tf = slide.placeholders[1].text_frame
-    tf.text = f"• Total Pagu Anggaran : Rp {metrics['pagu']:,.0f}"
-    tf.add_paragraph().text = f"• Total Realisasi (incl. Outstanding) : Rp {metrics['realisasi']:,.0f}"
-    tf.add_paragraph().text = f"• Total Sisa Anggaran : Rp {metrics['sisa']:,.0f}"
-    tf.add_paragraph().text = f"• Rata-rata Tingkat Penyerapan : {metrics['persentase']:.2f}%"
-
-    output = io.BytesIO()
-    prs.save(output)
-    output.seek(0)
-    return output
-
 # ==========================================
 # ANTARMUKA PENGGUNA (UI)
 # ==========================================
@@ -373,16 +346,14 @@ if file_rab and file_lra_list:
             st.divider()
 
             # ==========================================
-            # DASHBOARD EXECUTIVE SUMMARY METRICS (VALID)
+            # DASHBOARD EXECUTIVE SUMMARY METRICS
             # ==========================================
             st.subheader("📈 Dashboard Ringkasan Eksekutif (Executive Summary)")
             
-            # Gunakan data Satker resmi dari LRA All Periode
             total_pagu_all = satker_summary["pagu"]
             total_realisasi_bulanan = satker_summary["realisasi"]
             total_out_all = satker_summary["outstanding"]
             
-            # Total Realisasi termasuk Outstanding
             total_realisasi_incl_out = total_realisasi_bulanan + total_out_all
             total_sisa_all = satker_summary["sisa"]
             persen_nasional = (total_realisasi_incl_out / total_pagu_all * 100) if total_pagu_all > 0 else 0
@@ -396,7 +367,9 @@ if file_rab and file_lra_list:
 
             st.markdown("---")
             st.markdown("### 📊 Grafik Tren Penyerapan Anggaran Bulanan")
-            s_bulan = pd.Series(monthly_totals)
+            
+            # URUTKAN BULAN SECARA KRONOLOGIS (JANUARI s.d. DESEMBER)
+            s_bulan = pd.Series(monthly_totals).reindex(list_semua_bulan)
             st.bar_chart(s_bulan)
 
             with st.expander("🔍 Pratinjau & Filter Data Konsolidasi", expanded=False):

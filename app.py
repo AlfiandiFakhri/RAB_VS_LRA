@@ -6,7 +6,6 @@ from openpyxl.utils import get_column_letter
 import io
 import re
 from copy import copy
-import matplotlib.pyplot as plt
 
 # Pengaman untuk Library PowerPoint
 try:
@@ -368,7 +367,7 @@ if file_rab and file_lra_list:
 
             st.markdown("---")
             
-            # TAMPILAN GRAFIK (BAR & PIE MATPLOTLIB) DALAM 2 KOLOM
+            # TAMPILAN GRAFIK & RINCIAN KOMPONEN DALAM 2 KOLOM
             col_chart1, col_chart2 = st.columns(2)
             
             with col_chart1:
@@ -378,20 +377,18 @@ if file_rab and file_lra_list:
                 st.bar_chart(s_bulan)
 
             with col_chart2:
-                st.markdown("### 🥧 Proporsi Pagu per Komponen")
+                st.markdown("### 🥧 Rincian Proporsi Pagu per Komponen")
                 if not df_preview.empty:
                     df_comp = df_preview.groupby("Komponen")["Pagu"].sum().reset_index()
+                    tot_comp_pagu = df_comp["Pagu"].sum()
                     
-                    fig, ax = plt.subplots(figsize=(5, 5))
-                    ax.pie(
-                        df_comp['Pagu'], 
-                        labels=df_comp['Komponen'], 
-                        autopct='%1.1f%%', 
-                        startangle=90,
-                        colors=plt.cm.Pastel1.colors
-                    )
-                    ax.axis('equal')
-                    st.pyplot(fig)
+                    for _, row in df_comp.iterrows():
+                        c_id = row["Komponen"]
+                        c_pagu = row["Pagu"]
+                        c_pct = (c_pagu / tot_comp_pagu * 100) if tot_comp_pagu > 0 else 0
+                        
+                        st.markdown(f"**Komponen {c_id}** — Rp {c_pagu:,.0f} *({c_pct:.1f}%)*")
+                        st.progress(c_pct / 100.0)
                 else:
                     st.info("Data komponen belum tersedia.")
 

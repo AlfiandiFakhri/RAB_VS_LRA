@@ -97,10 +97,11 @@ if file_rab and file_lra:
                 baris_header = 13 
                 baris_mulai_data = 14
                 
+                # URAIAN BULAN DIUBAH MENJADI NAMA LENGKAP
                 kolom_baru = [
                     "TOTAL Realisasi", "SISA", 
-                    "JAN", "FEB", "MAR", "APR", "MEI", "JUN", 
-                    "JUL", "AGU", "SEP", "OKT", "NOV", "DES", "KETERANGAN"
+                    "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", 
+                    "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER", "KETERANGAN"
                 ]
                 
                 header_ref = ws.cell(row=baris_header, column=19)
@@ -124,7 +125,8 @@ if file_rab and file_lra:
 
                 ws.column_dimensions[get_column_letter(20)].width = 20.5
                 ws.column_dimensions[get_column_letter(21)].width = 18.2
-                for c_idx in range(22, 34): ws.column_dimensions[get_column_letter(c_idx)].width = 12.0
+                # Lebar kolom bulan (22 sampai 33) disesuaikan agar nama bulan yang panjang muat dengan baik
+                for c_idx in range(22, 34): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0
                 ws.column_dimensions[get_column_letter(34)].width = 35.0
 
                 max_row = ws.max_row

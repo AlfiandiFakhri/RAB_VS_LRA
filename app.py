@@ -100,7 +100,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
     satker_summary = {"pagu": 0, "realisasi": 0, "sisa": 0, "outstanding": 0}
     monthly_totals = {b: 0 for b in list_semua_bulan}
     component_summary = {}
-    sub_component_realisasi = {} # Menyimpan Total Realisasi per Sub Komponen
+    sub_component_realisasi = {}
     
     for uploaded_lra in file_lra_list:
         uploaded_lra.seek(0)
@@ -160,7 +160,6 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                     if current_komp:
                         if current_komp not in sub_component_realisasi:
                             sub_component_realisasi[current_komp] = {}
-                        # Hanya ambil jika realisasi > 0 agar grafik bersih dari angka 0
                         if realisasi_sub > 0:
                             sub_component_realisasi[current_komp][uraian] = realisasi_sub
 
@@ -481,13 +480,6 @@ if file_rab and file_lra_list:
                             st.info("Belum ada realisasi anggaran pada komponen ini.")
             else:
                 st.info("Data realisasi sub komponen belum tersedia.")
-
-            with st.expander("🔍 Pratinjau & Filter Data Konsolidasi", expanded=False):
-                if not df_preview.empty:
-                    komponen_list = df_preview['Komponen'].unique()
-                    selected_comp = st.multiselect("Filter Berdasarkan Komponen:", options=komponen_list, default=komponen_list)
-                    df_filtered = df_preview[df_preview['Komponen'].isin(selected_comp)]
-                    st.dataframe(df_filtered, use_container_width=True)
 
             st.divider()
             st.subheader("📥 Download Berkas Laporan Akhir")

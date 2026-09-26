@@ -48,71 +48,85 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
     data_realisasi = {}
     
     for uploaded_lra in file_lra_list:
-        # 1. Deteksi Identitas File (Bulan atau File Outstanding)
-        df_raw = pd.read_excel(uploaded_lra, header=None, nrows=15) # Cek 15 baris pertama
+        # 1. Deteksi Identitas File 
+        df_raw = pd.read_excel(uploaded_lra, header=None, nrows=15)
         bulan_file = None
         is_outstanding_file = False
         
+        # Lapis 1: Cek dari NAMA FILE
+        fname_upper = uploaded_lra.name.upper().replace(" ", "")
+        if "SEMUALEVEL" in fname_upper or "ALLPERIODE" in fname_upper or "SEMUAPERIODE" in fname_upper:
+            is_outstanding_file = True
+
+        # Lapis 2: Cek dari ISI FILE (Baris 1-15) mencari teks header
         for r in range(len(df_raw)):
             row_text_raw = " ".join(str(val) for val in df_raw.iloc[r].values if pd.notna(val)).upper()
             row_text_clean = row_text_raw.replace(" ", "")
             
-            # Cek apakah ini file khusus Outstanding ("LEVEL: SEMUA LEVEL")
-            if "SEMUALEVEL" in row_text_clean:
+            if "SEMUALEVEL" in row_text_clean or "ALLPERIODE" in row_text_clean:
                 is_outstanding_file = True
                 
-            # Cek deteksi bulan
             for b in list_semua_bulan:
                 if b in row_text_raw:
                     bulan_file = b
                     break
-        
-        # Jika belum ketemu, cek dari nama file Excel-nya
-        fname_upper = uploaded_lra.name.upper()
+                    
+        # Jika bulan belum ketemu di dalam isi file, cek di nama filenya
         if not bulan_file:
             for b in list_semua_bulan:
-                if b in fname_upper:
+                if b in uploaded_lra.name.upper():
                     bulan_file = b
                     break
+                    
+        # BACA DATA LRA SEBENARNYA (Mulai Baris ke-6 / skiprows=5)
+        df_lra = pd.read_excel(uploaded_lra, skiprows=5)
         
-        if "SEMUALEVEL" in fname_upper.replace(" ", ""):
+        # Lapis 3: Failsafe (Kecerdasan Buatan Tambahan)
+        # Jika file tidak terdeteksi nama bulannya, tapi punya kolom GUP, SPM, Verifikasi, jadikan Outstanding
+        kolom_lra = [str(col).upper() for col in df_lra.columns]
+        ada_gup = any('GUP' in col for col in kolom_lra)
+        ada_spm = any('SPM' in col for col in kolom_lra)
+        
+        if not bulan_file and (ada_gup and ada_spm):
             is_outstanding_file = True
-            
-        # Jika bukan file LRA bulanan DAN bukan file Outstanding, maka lewati
+        
+        # Lewati jika benar-benar file random (bukan bulanan dan bukan outstanding)
         if not bulan_file and not is_outstanding_file:
             continue
             
-        # 2. Baca Data LRA (Mulai Baris ke-6)
-        df_lra = pd.read_excel(uploaded_lra, skiprows=5)
-        
-        # Cari secara dinamis kolom yang mengandung "GUP", "SPM"
-        col_outstanding_name = None
-        for col in df_lra.columns:
-            if isinstance(col, str):
-                c_clean = col.upper().replace(' ', '')
-                if 'GUP' in c_clean and 'SPM' in c_clean:
-                    col_outstanding_name = col
-                    break
-
         cur_komp, cur_sub, cur_akun = "GLOBAL", "GLOBAL", "GLOBAL"
         
         for index, row in df_lra.iterrows():
             lvl = str(row.get('Level')).strip()
             uraian = str(row.get('Kode / Uraian', '')).strip()
             
-            # Parsing Total Realisasi
+            # === AMBIL REALISASI BULANAN ===
             realisasi = row.get('Total Realisasi', 0)
             try: realisasi = float(realisasi)
             except: realisasi = 0
             if pd.isna(realisasi): realisasi = 0
                 
-            # Parsing Nilai Out Standing (hanya jika kolomnya ditemukan)
+            # === AMBIL NILAI OUTSTANDING (GUP + SPM + VERIFIKASI) ===
             outstanding_val = 0
-            if col_outstanding_name:
-                val_out = row.get(col_outstanding_name, 0)
-                try: outstanding_val = float(val_out)
-                except: outstanding_val = 0
-            if pd.isna(outstanding_val): outstanding_val = 0
+            if is_outstanding_file:
+                # Mengambil dari 3 kolom yang terpisah
+                val_gup = row.get('GUP', 0)
+                val_spm = row.get('SPM', 0)
+                val_verifikasi = row.get('Verifikasi', 0)
+                
+                try: val_gup = float(val_gup)
+                except: val_gup = 0
+                if pd.isna(val_gup): val_gup = 0
+                
+                try: val_spm = float(val_spm)
+                except: val_spm = 0
+                if pd.isna(val_spm): val_spm = 0
+                
+                try: val_verifikasi = float(val_verifikasi)
+                except: val_verifikasi = 0
+                if pd.isna(val_verifikasi): val_verifikasi = 0
+                
+                outstanding_val = val_gup + val_spm + val_verifikasi
                 
             if lvl == 'Komponen':
                 match = re.search(r'(\d{3})\s*-', uraian)
@@ -137,11 +151,9 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                     data_realisasi[kamar_unik][norm_lra] = {b: 0 for b in list_semua_bulan}
                     data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] = 0
                 
-                # Jika file ini ada bulannya, masukkan ke realisasi bulan
                 if bulan_file:
                     data_realisasi[kamar_unik][norm_lra][bulan_file] += realisasi
                 
-                # Jika file ini terdeteksi sebagai file LEVEL: SEMUA LEVEL, ambil nilai Outstanding-nya
                 if is_outstanding_file:
                     data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] += outstanding_val
                 
@@ -183,9 +195,9 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
             if header_ref.has_style: cell.fill = copy(header_ref.fill)
 
     # Atur lebar kolom
-    ws.column_dimensions[get_column_letter(20)].width = 20.5 # Total Realisasi
-    ws.column_dimensions[get_column_letter(21)].width = 18.2 # Sisa
-    ws.column_dimensions[get_column_letter(22)].width = 18.2 # Out Standing
+    ws.column_dimensions[get_column_letter(20)].width = 20.5
+    ws.column_dimensions[get_column_letter(21)].width = 18.2 
+    ws.column_dimensions[get_column_letter(22)].width = 18.2 
     for c_idx in range(23, 35): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0
     ws.column_dimensions[get_column_letter(35)].width = 35.0
 
@@ -254,10 +266,10 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
                 cell_realisasi.value = total_realisasi_val
                 cell_outstanding.value = nilai_outstanding
                 
-                cell_sisa.value = f"=S{target_row}-T{target_row}-V{target_row}"
+                cell_sisa.value = f"=S{target_row}-T{target_row}"
                 
                 for idx_b, b_name in enumerate(list_semua_bulan):
-                    col_target_bulan = 23 + idx_b
+                    col_target_bulan = 23 + idx_b 
                     cell_bulan = ws.cell(row=target_row, column=col_target_bulan)
                     cell_bulan.value = dict_bulanan[b_name]
 

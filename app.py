@@ -506,13 +506,13 @@ if file_rab and file_lra_list:
                         total_komp_val = sum(sub_values)
                         
                         if total_komp_val > 0:
-                            # 1. Grafik Donut Ringkas dan Jelas
+                            # 1. Grafik Donut (Tanpa Hover / Tanpa fitur kursor)
                             fig_donut = go.Figure(data=[go.Pie(
                                 labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels],
                                 values=sub_values,
                                 hole=0.45,
                                 textinfo='percent+label',
-                                hoverinfo='label+value+percent',
+                                hoverinfo='none',  # Menghilangkan fitur melihat dengan kursor
                                 textfont_size=11,
                                 marker=dict(colors=chart_colors[:len(sub_labels)], line=dict(color='#FFFFFF', width=2))
                             )])
@@ -521,17 +521,32 @@ if file_rab and file_lra_list:
                                 paper_bgcolor="rgba(0,0,0,0)",
                                 margin=dict(t=20, b=20, l=20, r=20),
                                 showlegend=False,
-                                height=300
+                                height=280
                             )
                             st.plotly_chart(fig_donut, use_container_width=True)
                             
-                            # 2. Tabel Rincian Data Menggunakan Komponen Native Streamlit (100% Aman & Tanpa Error HTML)
-                            df_sub_table = pd.DataFrame({
-                                "Sub Komponen": sub_labels,
-                                "Total Realisasi (Rp)": [f"Rp {v:,.0f}" for v in sub_values],
-                                "Persentase": [f"{(v / total_komp_val * 100):.2f}%" for v in sub_values]
-                            })
-                            st.dataframe(df_sub_table, use_container_width=True, hide_index=True)
+                            # 2. Header Tabel Keterangan & Indikator Warna (Native Streamlit Columns)
+                            head_c = st.columns([0.5, 4.5, 2.5, 2])
+                            with head_c[0]: st.markdown("")
+                            with head_c[1]: st.markdown("**Sub Komponen**")
+                            with head_c[2]: st.markdown("**Total Realisasi (Rp)**")
+                            with head_c[3]: st.markdown("**Persentase**")
+                            st.markdown("<hr style='margin: 4px 0px 8px 0px;'>", unsafe_allow_html=True)
+
+                            # 3. Baris Data dengan Indikator Kotak Warna yang Selaras
+                            for i, (label, val) in enumerate(zip(sub_labels, sub_values)):
+                                color_hex = chart_colors[i % len(chart_colors)]
+                                pct = (val / total_komp_val) * 100
+                                
+                                row_c = st.columns([0.5, 4.5, 2.5, 2])
+                                with row_c[0]:
+                                    st.markdown(f"<div style='width:14px; height:14px; background-color:{color_hex}; border-radius:3px; margin-top:5px;'></div>", unsafe_allow_html=True)
+                                with row_c[1]:
+                                    st.markdown(f"<span style='font-size:12px; color:#212529;'>{label}</span>", unsafe_allow_html=True)
+                                with row_c[2]:
+                                    st.markdown(f"<span style='font-size:12px; font-weight:500; color:#212529;'>Rp {val:,.0f}</span>", unsafe_allow_html=True)
+                                with row_c[3]:
+                                    st.markdown(f"<span style='font-size:12px; font-weight:600; color:#495057;'>{pct:.2f}%</span>", unsafe_allow_html=True)
                         else:
                             st.info("Belum ada realisasi anggaran pada komponen ini.")
             else:

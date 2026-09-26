@@ -3,12 +3,17 @@ import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 from openpyxl.utils import get_column_letter
-from openpyxl.formatting.rule import CellIsRule
 import io
 import re
 from copy import copy
-from pptx import Presentation
-from pptx.util import Inches, Pt
+
+# Pengaman untuk Library PowerPoint
+try:
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+    HAS_PPTX = True
+except ImportError:
+    HAS_PPTX = False
 
 # ==========================================
 # KONFIGURASI HALAMAN
@@ -153,7 +158,6 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     baris_header = 13 
     baris_mulai_data = 14
     
-    # Penambahan Kolom PERSENTASE (%)
     kolom_baru = [
         "TOTAL Realisasi", "SISA", "OUT STANDING", 
         "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", 
@@ -184,20 +188,17 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
         else:
             if header_ref.has_style: cell.fill = copy(header_ref.fill)
 
-    # Lebar Kolom
-    ws.column_dimensions[get_column_letter(20)].width = 20.5 # Total Realisasi
-    ws.column_dimensions[get_column_letter(21)].width = 18.2 # Sisa
-    ws.column_dimensions[get_column_letter(22)].width = 18.2 # Outstanding
-    for c_idx in range(23, 35): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 # Bulan Jan-Des
-    ws.column_dimensions[get_column_letter(35)].width = 16.0 # Penyerapan %
-    ws.column_dimensions[get_column_letter(36)].width = 35.0 # Keterangan
+    ws.column_dimensions[get_column_letter(20)].width = 20.5 
+    ws.column_dimensions[get_column_letter(21)].width = 18.2 
+    ws.column_dimensions[get_column_letter(22)].width = 18.2 
+    for c_idx in range(23, 35): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 
+    ws.column_dimensions[get_column_letter(35)].width = 16.0 
+    ws.column_dimensions[get_column_letter(36)].width = 35.0 
 
     max_row = ws.max_row
     data_ditemukan = 0
     rab_komp, rab_sub, rab_akun = "GLOBAL", "GLOBAL", "GLOBAL"
     baris_terpakai = set()
-
-    # Struktur penampung untuk Dashboard Web
     summary_preview = []
 
     for row_idx in range(baris_mulai_data, max_row + 1):
@@ -250,10 +251,10 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
                 
                 baris_terpakai.add(target_row)
                 
-                cell_realisasi = ws.cell(row=target_row, column=20)   # Kolom T
-                cell_sisa = ws.cell(row=target_row, column=21)        # Kolom U
-                cell_outstanding = ws.cell(row=target_row, column=22) # Kolom V
-                cell_persen = ws.cell(row=target_row, column=35)      # Kolom AI
+                cell_realisasi = ws.cell(row=target_row, column=20)   
+                cell_sisa = ws.cell(row=target_row, column=21)        
+                cell_outstanding = ws.cell(row=target_row, column=22) 
+                cell_persen = ws.cell(row=target_row, column=35)      
                 
                 cell_outstanding.value = nilai_outstanding
                 
@@ -265,13 +266,11 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
                     cell_bulan.value = val_b
                     row_bulanan_val[b_name] = val_b
 
-                # Rumus Excel untuk Total Realisasi, Sisa, dan Penyerapan %
                 cell_realisasi.value = f"=SUM(W{target_row}:AH{target_row})+V{target_row}"
                 cell_sisa.value = f"=S{target_row}-T{target_row}"
                 cell_persen.value = f"=T{target_row}/S{target_row}"
                 cell_persen.number_format = '0.0%'
 
-                # Simpan untuk data preview & dashboard
                 pagu_val = ws.cell(row=target_row, column=19).value or 0
                 try: pagu_val = float(pagu_val)
                 except: pagu_val = 0
@@ -291,7 +290,7 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
                         c.font = copy(data_ref.font)
                         c.border = copy(data_ref.border)
                         c.alignment = copy(data_ref.alignment)
-                        if c_idx != 35: # Jangan timpa format persen
+                        if c_idx != 35: 
                             c.number_format = copy(data_ref.number_format)
                 
                 data_ditemukan += 1
@@ -302,19 +301,16 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     
     return output, data_ditemukan, pd.DataFrame(summary_preview)
 
-# ==========================================
-# FUNGSI GENERATE POWERPOINT PRESENTASI
-# ==========================================
 def generate_pptx_presentation(metrics, monthly_totals):
+    if not HAS_PPTX:
+        return None
     prs = Presentation()
     
-    # Slide 1: Judul
     slide_layout = prs.slide_layouts[0]
     slide = prs.slides.add_slide(slide_layout)
     slide.shapes.title.text = "LAPORAN KONSOLIDASI ANGGARAN"
     slide.placeholders[1].text = "Executive Summary RAB vs LRA Tahun 2026\nAsdep PIMEN - Kementerian Koperasi dan UKM"
 
-    # Slide 2: Ringkasan Metrik Utama
     slide_layout = prs.slide_layouts[1]
     slide = prs.slides.add_slide(slide_layout)
     slide.shapes.title.text = "Ringkasan Kinerja Anggaran (Executive Metrics)"
@@ -325,7 +321,6 @@ def generate_pptx_presentation(metrics, monthly_totals):
     tf.add_paragraph().text = f"• Total Sisa Anggaran : Rp {metrics['sisa']:,.0f}"
     tf.add_paragraph().text = f"• Rata-rata Tingkat Penyerapan : {metrics['persentase']:.2f}%"
 
-    # Slide 3: Catatan & Tren
     slide = prs.slides.add_slide(slide_layout)
     slide.shapes.title.text = "Catatan Strategis Pimpinan"
     tf2 = slide.placeholders[1].text_frame
@@ -375,12 +370,8 @@ if file_rab and file_lra_list:
             st.success(f"🎉 Berhasil menyelaraskan **{data_ditemukan} baris** data anggaran!")
             st.divider()
 
-            # ==========================================
-            # DASHBOARD EKSEKUTIF DI WEB
-            # ==========================================
             st.subheader("📈 Dashboard Ringkasan Eksekutif")
             
-            # Hitung Metrik Global dari Preview
             total_pagu_all = df_preview['Pagu'].sum() if not df_preview.empty else 0
             total_out_all = df_preview['Outstanding'].sum() if not df_preview.empty else 0
             
@@ -396,7 +387,6 @@ if file_rab and file_lra_list:
             total_sisa_all = total_pagu_all - total_realisasi_incl_out
             persen_nasional = (total_realisasi_incl_out / total_pagu_all * 100) if total_pagu_all > 0 else 0
 
-            # Tampilkan 4 Kartu Metrik
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("💰 Total Pagu Anggaran", f"Rp {total_pagu_all:,.0f}")
             m2.metric("📉 Total Realisasi (+ Outstd)", f"Rp {total_realisasi_incl_out:,.0f}")
@@ -404,13 +394,10 @@ if file_rab and file_lra_list:
             m4.metric("📊 Tingkat Penyerapan", f"{persen_nasional:.2f}%")
 
             st.markdown("---")
-
-            # Grafik Tren Bulanan
             st.markdown("### 📊 Grafik Tren Penyerapan Anggaran Bulanan")
             s_bulan = pd.Series(monthly_sums)
             st.bar_chart(s_bulan)
 
-            # Data Preview & Filter
             with st.expander("🔍 Pratinjau & Filter Data Konsolidasi (Preview Tabel)", expanded=False):
                 komponen_list = df_preview['Komponen'].unique() if not df_preview.empty else []
                 selected_komp = st.multiselect("Filter Berdasarkan Komponen:", options=komponen_list, default=komponen_list)
@@ -421,9 +408,6 @@ if file_rab and file_lra_list:
 
             st.divider()
 
-            # ==========================================
-            # TOMBOL DOWNLOAD (EXCEL & POWERPOINT)
-            # ==========================================
             st.subheader("📥 Download Berkas Laporan Akhir")
             
             metrics_dict = {
@@ -432,8 +416,7 @@ if file_rab and file_lra_list:
                 "sisa": total_sisa_all,
                 "persentase": persen_nasional
             }
-            pptx_file = generate_pptx_presentation(metrics_dict, monthly_sums)
-
+            
             dl_col1, dl_col2 = st.columns(2)
             with dl_col1:
                 st.download_button(
@@ -445,14 +428,18 @@ if file_rab and file_lra_list:
                     use_container_width=True
                 )
             with dl_col2:
-                st.download_button(
-                    label="📊 Download Slide Presentasi Pimpinan (.pptx)",
-                    data=pptx_file,
-                    file_name="PRESENTASI_KINERJA_ANGGARAN_2026.pptx",
-                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    type="secondary",
-                    use_container_width=True
-                )
+                if HAS_PPTX:
+                    pptx_file = generate_pptx_presentation(metrics_dict, monthly_sums)
+                    st.download_button(
+                        label="📊 Download Slide Presentasi Pimpinan (.pptx)",
+                        data=pptx_file,
+                        file_name="PRESENTASI_KINERJA_ANGGARAN_2026.pptx",
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        type="secondary",
+                        use_container_width=True
+                    )
+                else:
+                    st.warning("⚠️ Fitur PowerPoint (.pptx) belum aktif. Tambahkan `python-pptx` ke file `requirements.txt` di server Anda jika ingin mengaktifkannya.")
 
         except Exception as e:
             st.error(f"⚠️ Terjadi kesalahan pada saat pemrosesan: {e}")

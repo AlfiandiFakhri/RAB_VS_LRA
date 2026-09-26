@@ -60,37 +60,47 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
         bulan_file = None
         is_outstanding_file = False
         
-        fname_upper = uploaded_lra.name.upper().replace(" ", "")
-        if "SEMUALEVEL" in fname_upper or "ALLPERIODE" in fname_upper or "SEMUAPERIODE" in fname_upper:
+        # 1. Cek Bulan dari NAMA FILE
+        fname_upper = uploaded_lra.name.upper()
+        for b in list_semua_bulan:
+            if b in fname_upper:
+                bulan_file = b
+                break
+
+        # 2. Cek Bulan dari ISI FILE (Baris 1-15)
+        if not bulan_file:
+            for r in range(len(df_raw)):
+                row_text_raw = " ".join(str(val) for val in df_raw.iloc[r].values if pd.notna(val)).upper()
+                for b in list_semua_bulan:
+                    if b in row_text_raw:
+                        bulan_file = b
+                        break
+                if bulan_file: break
+
+        # 3. Deteksi File Outstanding (Berdasarkan Nama File atau Isi File)
+        fname_clean = fname_upper.replace(" ", "")
+        keyword_out = ["SEMUA", "LEVEL", "ALL", "PERIODE", "REKAP", "GUP"]
+        if any(kw in fname_clean for kw in keyword_out) and not bulan_file:
             is_outstanding_file = True
 
         for r in range(len(df_raw)):
             row_text_raw = " ".join(str(val) for val in df_raw.iloc[r].values if pd.notna(val)).upper()
-            row_text_clean = row_text_raw.replace(" ", "")
-            
-            if "SEMUALEVEL" in row_text_clean or "ALLPERIODE" in row_text_clean:
-                is_outstanding_file = True
-                
-            for b in list_semua_bulan:
-                if b in row_text_raw:
-                    bulan_file = b
+            if "SEMUA" in row_text_raw or "LEVEL" in row_text_raw or "ALL" in row_text_raw or "PERIODE" in row_text_raw:
+                if not bulan_file:
+                    is_outstanding_file = True
                     break
-                    
-        if not bulan_file:
-            for b in list_semua_bulan:
-                if b in uploaded_lra.name.upper():
-                    bulan_file = b
-                    break
-                    
+
+        # Baca Data LRA
         df_lra = pd.read_excel(uploaded_lra, skiprows=5)
         
+        # 4. Failsafe Utama: Cek Kolom GUP / SPM / Verifikasi
         kolom_lra = [str(col).upper() for col in df_lra.columns]
-        ada_gup = any('GUP' in col for col in kolom_lra)
-        ada_spm = any('SPM' in col for col in kolom_lra)
+        ada_gup_spm = any('GUP' in col or 'SPM' in col or 'VERIFIKASI' in col for col in kolom_lra)
         
-        if not bulan_file and (ada_gup and ada_spm):
+        if ada_gup_spm and not bulan_file:
             is_outstanding_file = True
-        
+
+        # Jika bukan file bulanan DAN bukan file outstanding, baru di-skip
         if not bulan_file and not is_outstanding_file:
             continue
             
@@ -348,7 +358,7 @@ with col2:
     st.info("Langkah 2: Upload Seluruh File LRA (Jan - Des + All Periode)")
     file_lra_list = st.file_uploader("Pilih banyak file LRA sekaligus", type=['xlsx', 'xls'], accept_multiple_files=True, key="lra")
 
-if file_rab and file_lra_list:
+if file_rab and file_l_list_checked := file_lra_list:
     st.divider()
     if st.button("🚀 Proses Konsolidasi & Buat Dashboard", type="primary", use_container_width=True):
         
@@ -439,7 +449,7 @@ if file_rab and file_lra_list:
                         use_container_width=True
                     )
                 else:
-                    st.warning("⚠️ Fitur PowerPoint (.pptx) belum aktif. Tambahkan `python-pptx` ke file `requirements.txt` di server Anda jika ingin mengaktifkannya.")
+                    st.warning("⚠️ Fitur PowerPoint (.pptx) belum aktif. Tambahkan `python-pptx` ke file `requirements.txt` jika ingin mengaktifkannya.")
 
         except Exception as e:
             st.error(f"⚠️ Terjadi kesalahan pada saat pemrosesan: {e}")

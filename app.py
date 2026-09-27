@@ -24,7 +24,7 @@ except ImportError:
 # ==========================================
 # KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="RAB vs LRA Executive Generator", layout="wide", page_icon="📊")
+st.set_page_config(page_title="LAPORAN REALISASI ANGGARAN", layout="wide", page_icon="📊")
 
 def normalize_text(text):
     t = str(text)
@@ -573,8 +573,8 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
 # ==========================================
 # ANTARMUKA PENGGUNA (UI)
 # ==========================================
-st.title("📊 EXECUTIVE RAB VS LRA GENERATOR")
-st.markdown("**Konsolidasi Laporan Anggaran Multi-Bulan & Executive Summary (Kementerian Koperasi dan UKM)**")
+st.title("📊 LAPORAN REALISASI ANGGARAN")
+st.markdown("**Executive Summary**")
 st.divider()
 
 col1, col2 = st.columns(2)
@@ -587,7 +587,7 @@ with col2:
 
 if file_rab and file_lra_list:
     st.divider()
-    if st.button("🚀 Proses & Buat Laporan", type="primary", use_container_width=True):
+    if st.button("🚀 Proses", type="primary", use_container_width=True):
         
         list_semua_bulan = [
             'JANUARI', 'FEBRUARI', 'MARET', 'APRIL', 'MEI', 'JUNI', 
@@ -607,13 +607,13 @@ if file_rab and file_lra_list:
                 
                 status.update(label="Proses Selesai!", state="complete", expanded=False)
 
-            st.success(f"🎉 SUKSES! Berhasil menyelaraskan **{data_ditemukan} baris** data RAB dengan data LRA bulanan.")
+            st.success(f"🎉 SUKSES!")
             st.divider()
 
             # ==========================================
             # DASHBOARD EXECUTIVE SUMMARY METRICS
             # ==========================================
-            st.subheader("📈 Dashboard Ringkasan Eksekutif (Executive Summary)")
+            st.subheader("📈 Executive Summary")
             
             total_pagu_all = satker_summary["pagu"]
             total_realisasi_incl_out = satker_summary["realisasi"]
@@ -645,7 +645,7 @@ if file_rab and file_lra_list:
             st.markdown("---")
             
             # TAMPILAN GRAFIK BULANAN
-            st.markdown("### 📊 Tren Penyerapan Bulanan")
+            st.markdown("### 📊 REALISASI Bulanan")
             
             realisasi_per_bulan = [df_preview[bulan].max() if (bulan in df_preview.columns and not df_preview[bulan].empty) else 0 for bulan in list_semua_bulan]
             realisasi_per_bulan = [val if pd.notna(val) else 0 for val in realisasi_per_bulan]
@@ -692,7 +692,7 @@ if file_rab and file_lra_list:
             st.plotly_chart(fig_3d_bar, use_container_width=True)
 
             st.markdown("---")
-            st.markdown("### 📋 Rincian Proporsi Total Realisasi Sub Komponen per Komponen")
+            st.markdown("### 📋 Realisasi per Komponen")
             
             # Palet warna konsisten
             chart_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2']
@@ -769,7 +769,7 @@ if file_rab and file_lra_list:
             # FITUR BARU: RINCIAN TOTAL SISA SUB KOMPONEN
             # ==========================================
             st.markdown("---")
-            st.markdown("### 📋 Rincian Proporsi Total Sisa Anggaran Sub Komponen per Komponen")
+            st.markdown("### 📋 Sisa Anggaran per Komponen")
             
             if sub_component_sisa:
                 komp_keys_sisa = list(sub_component_sisa.keys())
@@ -845,7 +845,7 @@ if file_rab and file_lra_list:
                 st.info("Data sisa anggaran per sub komponen belum tersedia.")
 
             st.divider()
-            st.subheader("📥 Download Berkas Laporan & Presentasi")
+            st.subheader("📥 Berkas Laporan")
             
             dl_col1, dl_col2 = st.columns(2)
             with dl_col1:

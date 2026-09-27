@@ -34,6 +34,20 @@ def normalize_text(text):
     t = t.replace('-', '').strip().lower().replace(',', '')
     return t
 
+def safe_float(val):
+    """Mengonversi nilai blank, NaN, atau setrip ('-') di Excel menjadi 0.0"""
+    if pd.isna(val):
+        return 0.0
+    try:
+        # Hapus spasi dan koma jika formatnya string akuntansi
+        if isinstance(val, str):
+            val = val.replace(',', '').strip()
+            if val == '-' or val == '':
+                return 0.0
+        return float(val)
+    except (ValueError, TypeError):
+        return 0.0
+
 def match_texts_smart(t1, t2):
     if len(t1) < 4 or len(t2) < 4: return False
     if t1 == t2 or t1 in t2 or t2 in t1: return True
@@ -156,9 +170,11 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
             for _, row_lra in df_lra.iterrows():
                 lvl = str(row_lra.get('Level')).strip()
                 uraian = str(row_lra.get('Kode / Uraian', '')).strip()
-                pagu = float(row_lra.get('Pagu') or 0)
-                realisasi_sub = float(row_lra.get('Total Realisasi') or 0)
-                sisa_sub = float(row_lra.get('Sisa') or 0)
+                
+                # PERBAIKAN: Gunakan safe_float agar "-" atau NaN tidak diabaikan
+                pagu = safe_float(row_lra.get('Pagu'))
+                realisasi_sub = safe_float(row_lra.get('Total Realisasi'))
+                sisa_sub = safe_float(row_lra.get('Sisa'))
                 
                 if lvl == 'Komponen':
                     current_komp = uraian
@@ -178,18 +194,18 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                             sub_component_sisa[current_komp] = {}
                             
                         current_stored_real = sub_component_realisasi[current_komp].get(uraian, -1)
+                        
+                        # PERBAIKAN: Selalu masukkan jika belum ada, atau jika dari file outstanding, atau jika angkanya lebih besar
                         if is_outstanding_file or uraian not in sub_component_realisasi[current_komp] or realisasi_sub > current_stored_real:
-                            # Memasukkan semua sub komponen (walaupun 0) asalkan nilainya >= 0
-                            if realisasi_sub >= 0 and sisa_sub >= 0:
-                                sub_component_realisasi[current_komp][uraian] = realisasi_sub
-                                sub_component_sisa[current_komp][uraian] = sisa_sub
+                            sub_component_realisasi[current_komp][uraian] = realisasi_sub
+                            sub_component_sisa[current_komp][uraian] = sisa_sub
 
         if is_outstanding_file:
             satker_row = df_lra[df_lra['Level'].astype(str).str.strip() == 'Satker']
             if not satker_row.empty:
-                satker_summary["pagu"] = float(satker_row['Pagu'].values[0] or 0)
-                satker_summary["realisasi"] = float(satker_row['Total Realisasi'].values[0] or 0)
-                satker_summary["sisa"] = float(satker_row['Sisa'].values[0] or 0)
+                satker_summary["pagu"] = safe_float(satker_row['Pagu'].values[0])
+                satker_summary["realisasi"] = safe_float(satker_row['Total Realisasi'].values[0])
+                satker_summary["sisa"] = safe_float(satker_row['Sisa'].values[0])
             
             detail_rows = df_lra[df_lra['Level'].astype(str).str.strip() == 'Detail']
             gup_sum = pd.to_numeric(detail_rows['GUP'], errors='coerce').fillna(0).sum()
@@ -206,14 +222,10 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
             lvl = str(row.get('Level')).strip()
             uraian = str(row.get('Kode / Uraian', '')).strip()
             
-            realisasi = row.get('Total Realisasi', 0)
-            try: realisasi = float(realisasi)
-            except: realisasi = 0
-            if pd.isna(realisasi): realisasi = 0
-                
-            val_gup = float(row.get('GUP') or 0) if pd.notna(row.get('GUP')) else 0.0
-            val_spm = float(row.get('SPM') or 0) if pd.notna(row.get('SPM')) else 0.0
-            val_verifikasi = float(row.get('Verifikasi') or 0) if pd.notna(row.get('Verifikasi')) else 0.0
+            realisasi = safe_float(row.get('Total Realisasi'))
+            val_gup = safe_float(row.get('GUP'))
+            val_spm = safe_float(row.get('SPM'))
+            val_verifikasi = safe_float(row.get('Verifikasi'))
             outstanding_val = val_gup + val_spm + val_verifikasi
                 
             if lvl == 'Komponen':
@@ -488,7 +500,6 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
             sub_dict_filtered = {}
             for k, v in sub_dict.items():
                 try:
-                    # PERUBAHAN: Menampilkan yang nilainya 0
                     if pd.notna(v) and float(v) >= 0 and np.isfinite(float(v)):
                         sub_dict_filtered[k] = float(v)
                 except (ValueError, TypeError):
@@ -510,7 +521,6 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
             sub_vals = list(sub_dict_filtered.values())
             total_komp = sum(sub_vals)
             
-            # Buat chart Pie matplotlib (Hanya jika total realisasi > 0)
             if total_komp > 0:
                 fig_p, ax_p = plt.subplots(figsize=(5.5, 4.5))
                 ax_p.pie(
@@ -529,11 +539,9 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
                 pie_buf.seek(0)
                 slide_sub.shapes.add_picture(pie_buf, Inches(0.8), Inches(1.5), width=Inches(5.0))
             else:
-                # Jika totalnya 0 (semua sub 0), tampilkan teks informatif saja
                 t_box_empty = slide_sub.shapes.add_textbox(Inches(1.0), Inches(2.5), Inches(4.0), Inches(1.0))
                 t_box_empty.text_frame.text = "Belum ada realisasi (Rp 0)"
             
-            # Tambahkan Tabel Rincian di Samping Kanan (Tetap menampilkan angka 0)
             rows = len(sub_dict_filtered) + 1
             cols = 3
             left = Inches(6.2)
@@ -552,7 +560,6 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
             table.cell(0, 2).text = "Persentase"
             
             for r_idx, (lbl, val) in enumerate(zip(sub_labels, sub_vals), start=1):
-                # PERUBAHAN: Menghindari error pembagian dengan 0
                 pct = (val / total_komp * 100) if total_komp > 0 else 0
                 table.cell(r_idx, 0).text = lbl
                 table.cell(r_idx, 1).text = f"Rp {val:,.0f}"
@@ -699,18 +706,16 @@ if file_rab and file_lra_list:
                         sub_dict_filtered = {}
                         for k, v in sub_dict.items():
                             try:
-                                # PERUBAHAN: Menampilkan yang nilainya 0
                                 if pd.notna(v) and float(v) >= 0 and np.isfinite(float(v)):
                                     sub_dict_filtered[k] = float(v)
                             except (ValueError, TypeError):
                                 continue
                                 
                         if len(sub_dict_filtered) > 0:
-                            sub_labels = list(sub_dict_filtered.keys())
-                            sub_values = list(sub_dict_filtered.values())
+                            sub_labels = sorted(list(sub_dict_filtered.keys())) # Sort agar Sub A, B, C berurutan
+                            sub_values = [sub_dict_filtered[l] for l in sub_labels]
                             total_komp_val = sum(sub_values)
                             
-                            # 1. Grafik Donut HANYA DITAMPILKAN JIKA ADA TOTAL > 0
                             if total_komp_val > 0:
                                 fig_donut = go.Figure(data=[go.Pie(
                                     labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels],
@@ -732,7 +737,6 @@ if file_rab and file_lra_list:
                             else:
                                 st.info("Semua sub komponen belum memiliki realisasi (Rp 0).")
                             
-                            # 2. Header Tabel
                             head_c = st.columns([0.5, 4.5, 2.5, 2])
                             with head_c[0]: st.markdown("")
                             with head_c[1]: st.markdown("**Sub Komponen**")
@@ -740,10 +744,8 @@ if file_rab and file_lra_list:
                             with head_c[3]: st.markdown("**Persentase**")
                             st.markdown("<hr style='margin: 4px 0px 8px 0px;'>", unsafe_allow_html=True)
 
-                            # 3. Baris Data 
                             for i, (label, val) in enumerate(zip(sub_labels, sub_values)):
                                 color_hex = chart_colors[i % len(chart_colors)]
-                                # PERUBAHAN: Menghindari error pembagian dengan 0
                                 pct = (val / total_komp_val * 100) if total_komp_val > 0 else 0
                                 
                                 row_c = st.columns([0.5, 4.5, 2.5, 2])
@@ -778,7 +780,6 @@ if file_rab and file_lra_list:
                     sisa_dict_filtered = {}
                     for k, v in sisa_dict.items():
                         try:
-                            # PERUBAHAN: Menampilkan yang nilainya 0
                             if pd.notna(v) and float(v) >= 0 and np.isfinite(float(v)):
                                 sisa_dict_filtered[k] = float(v)
                         except (ValueError, TypeError):
@@ -789,11 +790,10 @@ if file_rab and file_lra_list:
                         
                         if len(sisa_dict_filtered) > 0:
                             has_any_sisa = True
-                            sub_labels_sisa = list(sisa_dict_filtered.keys())
-                            sub_values_sisa = list(sisa_dict_filtered.values())
+                            sub_labels_sisa = sorted(list(sisa_dict_filtered.keys())) # Sort agar berurutan A,B,C
+                            sub_values_sisa = [sisa_dict_filtered[l] for l in sub_labels_sisa]
                             total_komp_sisa_val = sum(sub_values_sisa)
                             
-                            # 1. Grafik Donut Sisa HANYA DITAMPILKAN JIKA ADA TOTAL SISA > 0
                             if total_komp_sisa_val > 0:
                                 fig_donut_sisa = go.Figure(data=[go.Pie(
                                     labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels_sisa],
@@ -815,7 +815,6 @@ if file_rab and file_lra_list:
                             else:
                                 st.info("Seluruh anggaran sub komponen telah terealisasi secara penuh (Sisa Rp 0).")
                             
-                            # 2. Header Tabel Sisa
                             head_s = st.columns([0.5, 4.5, 2.5, 2])
                             with head_s[0]: st.markdown("")
                             with head_s[1]: st.markdown("**Sub Komponen**")
@@ -823,10 +822,8 @@ if file_rab and file_lra_list:
                             with head_s[3]: st.markdown("**Persentase**")
                             st.markdown("<hr style='margin: 4px 0px 8px 0px;'>", unsafe_allow_html=True)
 
-                            # 3. Baris Data Sisa
                             for i, (label_sisa, val_sisa) in enumerate(zip(sub_labels_sisa, sub_values_sisa)):
                                 color_hex_sisa = chart_colors[i % len(chart_colors)]
-                                # PERUBAHAN: Menghindari error pembagian dengan 0
                                 pct_sisa = (val_sisa / total_komp_sisa_val * 100) if total_komp_sisa_val > 0 else 0
                                 
                                 row_s = st.columns([0.5, 4.5, 2.5, 2])

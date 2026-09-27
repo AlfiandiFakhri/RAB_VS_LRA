@@ -483,6 +483,20 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
     # 4. Slide Rincian Sub Komponen (Pie Chart & Tabel)
     if sub_component_realisasi:
         for komp_name, sub_dict in sub_component_realisasi.items():
+            
+            # --- PERBAIKAN PPTX: Filter nilai 0 / NaN agar PPTX tidak error ---
+            sub_dict_filtered = {}
+            for k, v in sub_dict.items():
+                try:
+                    if pd.notna(v) and float(v) > 0 and np.isfinite(float(v)):
+                        sub_dict_filtered[k] = float(v)
+                except (ValueError, TypeError):
+                    continue
+            
+            # Jangan buat slide chart kalau nilainya 0 semua
+            if len(sub_dict_filtered) == 0 or sum(sub_dict_filtered.values()) <= 0:
+                continue
+            
             slide_sub = prs.slides.add_slide(blank_layout)
             t_box_sub = slide_sub.shapes.add_textbox(Inches(0.8), Inches(0.4), Inches(11.7), Inches(0.8))
             tf_sub = t_box_sub.text_frame
@@ -493,8 +507,8 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
             p_hs.font.color.rgb = RGBColor(24, 43, 73)
             
             # Buat chart Pie matplotlib
-            sub_labels = list(sub_dict.keys())
-            sub_vals = list(sub_dict.values())
+            sub_labels = list(sub_dict_filtered.keys())
+            sub_vals = list(sub_dict_filtered.values())
             total_komp = sum(sub_vals)
             
             fig_p, ax_p = plt.subplots(figsize=(5.5, 4.5))
@@ -516,7 +530,7 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
             slide_sub.shapes.add_picture(pie_buf, Inches(0.8), Inches(1.5), width=Inches(5.0))
             
             # Tambahkan Tabel Rincian di Samping Kanan
-            rows = len(sub_dict) + 1
+            rows = len(sub_dict_filtered) + 1
             cols = 3
             left = Inches(6.2)
             top = Inches(1.8)
@@ -676,11 +690,21 @@ if file_rab and file_lra_list:
                     with sub_cols[idx]:
                         st.markdown(f"**{komp_name}**")
                         sub_dict = sub_component_realisasi[komp_name]
-                        sub_labels = list(sub_dict.keys())
-                        sub_values = list(sub_dict.values())
-                        total_komp_val = sum(sub_values)
                         
-                        if total_komp_val > 0:
+                        # --- PERBAIKAN UI: Filter nilai 0 / NaN agar Plotly tidak error ---
+                        sub_dict_filtered = {}
+                        for k, v in sub_dict.items():
+                            try:
+                                if pd.notna(v) and float(v) > 0 and np.isfinite(float(v)):
+                                    sub_dict_filtered[k] = float(v)
+                            except (ValueError, TypeError):
+                                continue
+                                
+                        if len(sub_dict_filtered) > 0 and sum(sub_dict_filtered.values()) > 0:
+                            sub_labels = list(sub_dict_filtered.keys())
+                            sub_values = list(sub_dict_filtered.values())
+                            total_komp_val = sum(sub_values)
+                            
                             # 1. Grafik Donut (Tanpa Hover)
                             fig_donut = go.Figure(data=[go.Pie(
                                 labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels],
@@ -733,7 +757,6 @@ if file_rab and file_lra_list:
             st.markdown("---")
             st.markdown("### 📋 Rincian Proporsi Total Sisa Anggaran Sub Komponen per Komponen")
             
-            # Kita menggunakan sub_component_sisa yang ditarik langsung secara persis dari file LRA
             if sub_component_sisa:
                 komp_keys_sisa = list(sub_component_sisa.keys())
                 has_any_sisa = False
@@ -743,7 +766,6 @@ if file_rab and file_lra_list:
                 for idx, komp_name in enumerate(komp_keys_sisa):
                     sisa_dict = sub_component_sisa[komp_name]
                     
-                    # Pembersihan nilai: Pastikan val berupa angka nyata dan > 0, hindari NaN atau Infinite
                     sisa_dict_filtered = {}
                     for k, v in sisa_dict.items():
                         try:
@@ -755,7 +777,6 @@ if file_rab and file_lra_list:
                     with sisa_cols[idx % 2]:
                         st.markdown(f"**{komp_name}**")
                         
-                        # Hanya coba membuat grafik jika masih ada data bernilai positif
                         if len(sisa_dict_filtered) > 0 and sum(sisa_dict_filtered.values()) > 0:
                             has_any_sisa = True
                             sub_labels_sisa = list(sisa_dict_filtered.keys())

@@ -107,6 +107,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
     component_summary = {}
     component_metrics = {}
     sub_component_realisasi = {}
+    sub_component_sisa = {} # PENAMBAHAN FITUR: Merekam sisa per sub komponen dari LRA
     
     for uploaded_lra in file_lra_list:
         uploaded_lra.seek(0)
@@ -173,9 +174,15 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                     if current_komp:
                         if current_komp not in sub_component_realisasi:
                             sub_component_realisasi[current_komp] = {}
-                        if is_outstanding_file or uraian not in sub_component_realisasi[current_komp] or realisasi_sub > sub_component_realisasi[current_komp].get(uraian, 0):
-                            if realisasi_sub > 0:
+                        if current_komp not in sub_component_sisa:
+                            sub_component_sisa[current_komp] = {}
+                            
+                        # PENAMBAHAN FITUR: Menangkap nilai sisa dari file LRA secara langsung
+                        current_stored_real = sub_component_realisasi[current_komp].get(uraian, -1)
+                        if is_outstanding_file or uraian not in sub_component_realisasi[current_komp] or realisasi_sub > current_stored_real:
+                            if realisasi_sub > 0 or sisa_sub > 0:
                                 sub_component_realisasi[current_komp][uraian] = realisasi_sub
+                                sub_component_sisa[current_komp][uraian] = sisa_sub
 
         if is_outstanding_file:
             satker_row = df_lra[df_lra['Level'].astype(str).str.strip() == 'Satker']
@@ -239,7 +246,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 if is_outstanding_file:
                     data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] += outstanding_val
                 
-    return data_realisasi, satker_summary, monthly_totals, component_summary, component_metrics, sub_component_realisasi
+    return data_realisasi, satker_summary, monthly_totals, component_summary, component_metrics, sub_component_realisasi, sub_component_sisa
 
 def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
     wb = load_workbook(file_rab)
@@ -357,15 +364,12 @@ def process_rab_lra(file_rab, data_realisasi, list_semua_bulan):
                 pagu_val = get_row_pagu(ws, target_row)
                 total_realisasi_row = sum(row_bulanan_val.values()) + nilai_outstanding
 
-                # FITUR TAMBAHAN: Merekam 'Sub_Komponen' dan Kalkulasi 'Sisa' ke Data Preview untuk Grafik
                 summary_preview.append({
                     "Komponen": rab_komp,
-                    "Sub_Komponen": rab_sub, 
                     "Uraian": uraian_rab,
                     "Pagu": pagu_val,
                     "Realisasi": total_realisasi_row,
                     "Outstanding": nilai_outstanding,
-                    "Sisa": pagu_val - total_realisasi_row, 
                     **row_bulanan_val
                 })
 
@@ -568,7 +572,8 @@ if file_rab and file_lra_list:
         try:
             with st.status("Sedang memproses dokumen dan menyusun ringkasan...", expanded=True) as status:
                 st.write("Mengekstrak data dari seluruh LRA (Realisasi & Outstanding)...")
-                data_realisasi, satker_summary, monthly_totals, component_summary, component_metrics, sub_component_realisasi = parse_lra_files(file_lra_list, list_semua_bulan)
+                # Pembaruan Fungsi untuk ikut menarik data Sisa
+                data_realisasi, satker_summary, monthly_totals, component_summary, component_metrics, sub_component_realisasi, sub_component_sisa = parse_lra_files(file_lra_list, list_semua_bulan)
                 
                 st.write("Menyelaraskan dan memodifikasi template RAB...")
                 output_excel, data_ditemukan, df_preview = process_rab_lra(file_rab, data_realisasi, list_semua_bulan)
@@ -730,75 +735,73 @@ if file_rab and file_lra_list:
             st.markdown("---")
             st.markdown("### 📋 Rincian Proporsi Total Sisa Anggaran Sub Komponen per Komponen")
             
-            if 'Sub_Komponen' in df_preview.columns and 'Sisa' in df_preview.columns:
-                # Mengelompokkan dan menjumlahkan nilai Sisa berdasarkan Komponen & Sub Komponen
-                sisa_grouped = df_preview.groupby(['Komponen', 'Sub_Komponen'])['Sisa'].sum().reset_index()
+            # Kita menggunakan sub_component_sisa yang ditarik langsung secara persis dari file LRA
+            if sub_component_sisa:
+                komp_keys_sisa = list(sub_component_sisa.keys())
+                has_any_sisa = False
                 
-                if sisa_grouped['Sisa'].sum() > 0:
-                    komp_keys_sisa = sisa_grouped['Komponen'].unique()
+                sisa_cols = st.columns(2)
+                
+                for idx, komp_name in enumerate(komp_keys_sisa):
+                    sisa_dict = sub_component_sisa[komp_name]
+                    # Filter hanya yang sisanya > 0 agar grafik terlihat rapi
+                    sisa_dict_filtered = {k: v for k, v in sisa_dict.items() if v > 0}
                     
-                    for idx, komp_name in enumerate(komp_keys_sisa):
-                        col_idx = idx % 2
-                        if col_idx == 0:
-                            sisa_cols = st.columns(2)
+                    with sisa_cols[idx % 2]:
+                        st.markdown(f"**{komp_name}**")
+                        
+                        if sisa_dict_filtered:
+                            has_any_sisa = True
+                            sub_labels_sisa = list(sisa_dict_filtered.keys())
+                            sub_values_sisa = list(sisa_dict_filtered.values())
+                            total_komp_sisa_val = sum(sub_values_sisa)
                             
-                        with sisa_cols[col_idx]:
-                            st.markdown(f"**Komponen {komp_name}**")
+                            # 1. Grafik Donut Sisa
+                            fig_donut_sisa = go.Figure(data=[go.Pie(
+                                labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels_sisa],
+                                values=sub_values_sisa,
+                                hole=0.45,
+                                textinfo='percent+label',
+                                hoverinfo='none',
+                                textfont_size=11,
+                                marker=dict(colors=chart_colors[:len(sub_labels_sisa)], line=dict(color='#FFFFFF', width=2))
+                            )])
+                            fig_donut_sisa.update_layout(
+                                plot_bgcolor="rgba(0,0,0,0)",
+                                paper_bgcolor="rgba(0,0,0,0)",
+                                margin=dict(t=20, b=20, l=20, r=20),
+                                showlegend=False,
+                                height=280
+                            )
+                            st.plotly_chart(fig_donut_sisa, use_container_width=True)
                             
-                            df_sub_sisa = sisa_grouped[sisa_grouped['Komponen'] == komp_name]
-                            df_sub_sisa = df_sub_sisa[df_sub_sisa['Sisa'] > 0] # Filter agar hanya yang memiliki sisa > 0 yg tampil di diagram
-                            
-                            if not df_sub_sisa.empty:
-                                sub_labels_sisa = df_sub_sisa['Sub_Komponen'].tolist()
-                                sub_values_sisa = df_sub_sisa['Sisa'].tolist()
-                                total_komp_sisa_val = sum(sub_values_sisa)
-                                
-                                # 1. Grafik Donut Sisa
-                                fig_donut_sisa = go.Figure(data=[go.Pie(
-                                    labels=[f"Sub {l}" if l != "GLOBAL" else "Lainnya/Global" for l in sub_labels_sisa],
-                                    values=sub_values_sisa,
-                                    hole=0.45,
-                                    textinfo='percent+label',
-                                    hoverinfo='none',
-                                    textfont_size=11,
-                                    marker=dict(colors=chart_colors[:len(sub_labels_sisa)], line=dict(color='#FFFFFF', width=2))
-                                )])
-                                fig_donut_sisa.update_layout(
-                                    plot_bgcolor="rgba(0,0,0,0)",
-                                    paper_bgcolor="rgba(0,0,0,0)",
-                                    margin=dict(t=20, b=20, l=20, r=20),
-                                    showlegend=False,
-                                    height=280
-                                )
-                                st.plotly_chart(fig_donut_sisa, use_container_width=True)
-                                
-                                # 2. Header Tabel Sisa
-                                head_s = st.columns([0.5, 4.5, 2.5, 2])
-                                with head_s[0]: st.markdown("")
-                                with head_s[1]: st.markdown("**Sub Komponen**")
-                                with head_s[2]: st.markdown("**Total Sisa (Rp)**")
-                                with head_s[3]: st.markdown("**Persentase**")
-                                st.markdown("<hr style='margin: 4px 0px 8px 0px;'>", unsafe_allow_html=True)
+                            # 2. Header Tabel Sisa
+                            head_s = st.columns([0.5, 4.5, 2.5, 2])
+                            with head_s[0]: st.markdown("")
+                            with head_s[1]: st.markdown("**Sub Komponen**")
+                            with head_s[2]: st.markdown("**Total Sisa (Rp)**")
+                            with head_s[3]: st.markdown("**Persentase**")
+                            st.markdown("<hr style='margin: 4px 0px 8px 0px;'>", unsafe_allow_html=True)
 
-                                # 3. Baris Data Sisa
-                                for i, (label_sisa, val_sisa) in enumerate(zip(sub_labels_sisa, sub_values_sisa)):
-                                    color_hex_sisa = chart_colors[i % len(chart_colors)]
-                                    pct_sisa = (val_sisa / total_komp_sisa_val) * 100
-                                    
-                                    row_s = st.columns([0.5, 4.5, 2.5, 2])
-                                    with row_s[0]:
-                                        st.markdown(f"<div style='width:14px; height:14px; background-color:{color_hex_sisa}; border-radius:3px; margin-top:5px;'></div>", unsafe_allow_html=True)
-                                    with row_s[1]:
-                                        disp_label = f"Sub {label_sisa}" if label_sisa != "GLOBAL" else "Lainnya/Global"
-                                        st.markdown(f"<span style='font-size:12px; color:#212529;'>{disp_label}</span>", unsafe_allow_html=True)
-                                    with row_s[2]:
-                                        st.markdown(f"<span style='font-size:12px; font-weight:500; color:#212529;'>Rp {val_sisa:,.0f}</span>", unsafe_allow_html=True)
-                                    with row_s[3]:
-                                        st.markdown(f"<span style='font-size:12px; font-weight:600; color:#495057;'>{pct_sisa:.2f}%</span>", unsafe_allow_html=True)
-                            else:
-                                st.info("Tidak ada sisa anggaran (atau Rp 0) pada sub komponen ini.")
-                else:
-                    st.info("Seluruh anggaran sub komponen telah terealisasi secara penuh (Sisa Rp 0).")
+                            # 3. Baris Data Sisa
+                            for i, (label_sisa, val_sisa) in enumerate(zip(sub_labels_sisa, sub_values_sisa)):
+                                color_hex_sisa = chart_colors[i % len(chart_colors)]
+                                pct_sisa = (val_sisa / total_komp_sisa_val) * 100
+                                
+                                row_s = st.columns([0.5, 4.5, 2.5, 2])
+                                with row_s[0]:
+                                    st.markdown(f"<div style='width:14px; height:14px; background-color:{color_hex_sisa}; border-radius:3px; margin-top:5px;'></div>", unsafe_allow_html=True)
+                                with row_s[1]:
+                                    st.markdown(f"<span style='font-size:12px; color:#212529;'>{label_sisa}</span>", unsafe_allow_html=True)
+                                with row_s[2]:
+                                    st.markdown(f"<span style='font-size:12px; font-weight:500; color:#212529;'>Rp {val_sisa:,.0f}</span>", unsafe_allow_html=True)
+                                with row_s[3]:
+                                    st.markdown(f"<span style='font-size:12px; font-weight:600; color:#495057;'>{pct_sisa:.2f}%</span>", unsafe_allow_html=True)
+                        else:
+                            st.info("Seluruh anggaran sub komponen telah terealisasi secara penuh (Sisa Rp 0).")
+                            
+                if not has_any_sisa and len(komp_keys_sisa) == 0:
+                     st.info("Data sisa anggaran per sub komponen belum tersedia.")
             else:
                 st.info("Data sisa anggaran per sub komponen belum tersedia.")
 

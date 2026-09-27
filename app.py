@@ -179,7 +179,8 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                             
                         current_stored_real = sub_component_realisasi[current_komp].get(uraian, -1)
                         if is_outstanding_file or uraian not in sub_component_realisasi[current_komp] or realisasi_sub > current_stored_real:
-                            if realisasi_sub > 0 or sisa_sub > 0:
+                            # Memasukkan semua sub komponen (walaupun 0) asalkan nilainya >= 0
+                            if realisasi_sub >= 0 and sisa_sub >= 0:
                                 sub_component_realisasi[current_komp][uraian] = realisasi_sub
                                 sub_component_sisa[current_komp][uraian] = sisa_sub
 
@@ -484,17 +485,16 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
     if sub_component_realisasi:
         for komp_name, sub_dict in sub_component_realisasi.items():
             
-            # --- PERBAIKAN PPTX: Filter nilai 0 / NaN agar PPTX tidak error ---
             sub_dict_filtered = {}
             for k, v in sub_dict.items():
                 try:
-                    if pd.notna(v) and float(v) > 0 and np.isfinite(float(v)):
+                    # PERUBAHAN: Menampilkan yang nilainya 0
+                    if pd.notna(v) and float(v) >= 0 and np.isfinite(float(v)):
                         sub_dict_filtered[k] = float(v)
                 except (ValueError, TypeError):
                     continue
             
-            # Jangan buat slide chart kalau nilainya 0 semua
-            if len(sub_dict_filtered) == 0 or sum(sub_dict_filtered.values()) <= 0:
+            if len(sub_dict_filtered) == 0:
                 continue
             
             slide_sub = prs.slides.add_slide(blank_layout)
@@ -506,30 +506,34 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
             p_hs.font.bold = True
             p_hs.font.color.rgb = RGBColor(24, 43, 73)
             
-            # Buat chart Pie matplotlib
             sub_labels = list(sub_dict_filtered.keys())
             sub_vals = list(sub_dict_filtered.values())
             total_komp = sum(sub_vals)
             
-            fig_p, ax_p = plt.subplots(figsize=(5.5, 4.5))
-            ax_p.pie(
-                sub_vals, 
-                labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels], 
-                autopct='%1.1f%%', 
-                startangle=90, 
-                colors=plt.cm.Paired.colors
-            )
-            ax_p.axis('equal')
-            plt.tight_layout()
+            # Buat chart Pie matplotlib (Hanya jika total realisasi > 0)
+            if total_komp > 0:
+                fig_p, ax_p = plt.subplots(figsize=(5.5, 4.5))
+                ax_p.pie(
+                    sub_vals, 
+                    labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels], 
+                    autopct='%1.1f%%', 
+                    startangle=90, 
+                    colors=plt.cm.Paired.colors
+                )
+                ax_p.axis('equal')
+                plt.tight_layout()
+                
+                pie_buf = io.BytesIO()
+                fig_p.savefig(pie_buf, format='png', dpi=200, bbox_inches='tight')
+                plt.close(fig_p)
+                pie_buf.seek(0)
+                slide_sub.shapes.add_picture(pie_buf, Inches(0.8), Inches(1.5), width=Inches(5.0))
+            else:
+                # Jika totalnya 0 (semua sub 0), tampilkan teks informatif saja
+                t_box_empty = slide_sub.shapes.add_textbox(Inches(1.0), Inches(2.5), Inches(4.0), Inches(1.0))
+                t_box_empty.text_frame.text = "Belum ada realisasi (Rp 0)"
             
-            pie_buf = io.BytesIO()
-            fig_p.savefig(pie_buf, format='png', dpi=200, bbox_inches='tight')
-            plt.close(fig_p)
-            pie_buf.seek(0)
-            
-            slide_sub.shapes.add_picture(pie_buf, Inches(0.8), Inches(1.5), width=Inches(5.0))
-            
-            # Tambahkan Tabel Rincian di Samping Kanan
+            # Tambahkan Tabel Rincian di Samping Kanan (Tetap menampilkan angka 0)
             rows = len(sub_dict_filtered) + 1
             cols = 3
             left = Inches(6.2)
@@ -548,6 +552,7 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
             table.cell(0, 2).text = "Persentase"
             
             for r_idx, (lbl, val) in enumerate(zip(sub_labels, sub_vals), start=1):
+                # PERUBAHAN: Menghindari error pembagian dengan 0
                 pct = (val / total_komp * 100) if total_komp > 0 else 0
                 table.cell(r_idx, 0).text = lbl
                 table.cell(r_idx, 1).text = f"Rp {val:,.0f}"
@@ -691,40 +696,43 @@ if file_rab and file_lra_list:
                         st.markdown(f"**{komp_name}**")
                         sub_dict = sub_component_realisasi[komp_name]
                         
-                        # --- PERBAIKAN UI: Filter nilai 0 / NaN agar Plotly tidak error ---
                         sub_dict_filtered = {}
                         for k, v in sub_dict.items():
                             try:
-                                if pd.notna(v) and float(v) > 0 and np.isfinite(float(v)):
+                                # PERUBAHAN: Menampilkan yang nilainya 0
+                                if pd.notna(v) and float(v) >= 0 and np.isfinite(float(v)):
                                     sub_dict_filtered[k] = float(v)
                             except (ValueError, TypeError):
                                 continue
                                 
-                        if len(sub_dict_filtered) > 0 and sum(sub_dict_filtered.values()) > 0:
+                        if len(sub_dict_filtered) > 0:
                             sub_labels = list(sub_dict_filtered.keys())
                             sub_values = list(sub_dict_filtered.values())
                             total_komp_val = sum(sub_values)
                             
-                            # 1. Grafik Donut (Tanpa Hover)
-                            fig_donut = go.Figure(data=[go.Pie(
-                                labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels],
-                                values=sub_values,
-                                hole=0.45,
-                                textinfo='percent+label',
-                                hoverinfo='none',
-                                textfont_size=11,
-                                marker=dict(colors=chart_colors[:len(sub_labels)], line=dict(color='#FFFFFF', width=2))
-                            )])
-                            fig_donut.update_layout(
-                                plot_bgcolor="rgba(0,0,0,0)",
-                                paper_bgcolor="rgba(0,0,0,0)",
-                                margin=dict(t=20, b=20, l=20, r=20),
-                                showlegend=False,
-                                height=280
-                            )
-                            st.plotly_chart(fig_donut, use_container_width=True)
+                            # 1. Grafik Donut HANYA DITAMPILKAN JIKA ADA TOTAL > 0
+                            if total_komp_val > 0:
+                                fig_donut = go.Figure(data=[go.Pie(
+                                    labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels],
+                                    values=sub_values,
+                                    hole=0.45,
+                                    textinfo='percent+label',
+                                    hoverinfo='none',
+                                    textfont_size=11,
+                                    marker=dict(colors=chart_colors[:len(sub_labels)], line=dict(color='#FFFFFF', width=2))
+                                )])
+                                fig_donut.update_layout(
+                                    plot_bgcolor="rgba(0,0,0,0)",
+                                    paper_bgcolor="rgba(0,0,0,0)",
+                                    margin=dict(t=20, b=20, l=20, r=20),
+                                    showlegend=False,
+                                    height=280
+                                )
+                                st.plotly_chart(fig_donut, use_container_width=True)
+                            else:
+                                st.info("Semua sub komponen belum memiliki realisasi (Rp 0).")
                             
-                            # 2. Header Tabel Keterangan & Indikator Warna
+                            # 2. Header Tabel
                             head_c = st.columns([0.5, 4.5, 2.5, 2])
                             with head_c[0]: st.markdown("")
                             with head_c[1]: st.markdown("**Sub Komponen**")
@@ -732,10 +740,11 @@ if file_rab and file_lra_list:
                             with head_c[3]: st.markdown("**Persentase**")
                             st.markdown("<hr style='margin: 4px 0px 8px 0px;'>", unsafe_allow_html=True)
 
-                            # 3. Baris Data dengan Indikator Kotak Warna
+                            # 3. Baris Data 
                             for i, (label, val) in enumerate(zip(sub_labels, sub_values)):
                                 color_hex = chart_colors[i % len(chart_colors)]
-                                pct = (val / total_komp_val) * 100
+                                # PERUBAHAN: Menghindari error pembagian dengan 0
+                                pct = (val / total_komp_val * 100) if total_komp_val > 0 else 0
                                 
                                 row_c = st.columns([0.5, 4.5, 2.5, 2])
                                 with row_c[0]:
@@ -747,7 +756,7 @@ if file_rab and file_lra_list:
                                 with row_c[3]:
                                     st.markdown(f"<span style='font-size:12px; font-weight:600; color:#495057;'>{pct:.2f}%</span>", unsafe_allow_html=True)
                         else:
-                            st.info("Belum ada realisasi anggaran pada komponen ini.")
+                            st.info("Data realisasi belum tersedia.")
             else:
                 st.info("Data realisasi sub komponen belum tersedia.")
 
@@ -769,7 +778,8 @@ if file_rab and file_lra_list:
                     sisa_dict_filtered = {}
                     for k, v in sisa_dict.items():
                         try:
-                            if pd.notna(v) and float(v) > 0 and np.isfinite(float(v)):
+                            # PERUBAHAN: Menampilkan yang nilainya 0
+                            if pd.notna(v) and float(v) >= 0 and np.isfinite(float(v)):
                                 sisa_dict_filtered[k] = float(v)
                         except (ValueError, TypeError):
                             continue
@@ -777,30 +787,33 @@ if file_rab and file_lra_list:
                     with sisa_cols[idx % 2]:
                         st.markdown(f"**{komp_name}**")
                         
-                        if len(sisa_dict_filtered) > 0 and sum(sisa_dict_filtered.values()) > 0:
+                        if len(sisa_dict_filtered) > 0:
                             has_any_sisa = True
                             sub_labels_sisa = list(sisa_dict_filtered.keys())
                             sub_values_sisa = list(sisa_dict_filtered.values())
                             total_komp_sisa_val = sum(sub_values_sisa)
                             
-                            # 1. Grafik Donut Sisa
-                            fig_donut_sisa = go.Figure(data=[go.Pie(
-                                labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels_sisa],
-                                values=sub_values_sisa,
-                                hole=0.45,
-                                textinfo='percent+label',
-                                hoverinfo='none',
-                                textfont_size=11,
-                                marker=dict(colors=chart_colors[:len(sub_labels_sisa)], line=dict(color='#FFFFFF', width=2))
-                            )])
-                            fig_donut_sisa.update_layout(
-                                plot_bgcolor="rgba(0,0,0,0)",
-                                paper_bgcolor="rgba(0,0,0,0)",
-                                margin=dict(t=20, b=20, l=20, r=20),
-                                showlegend=False,
-                                height=280
-                            )
-                            st.plotly_chart(fig_donut_sisa, use_container_width=True)
+                            # 1. Grafik Donut Sisa HANYA DITAMPILKAN JIKA ADA TOTAL SISA > 0
+                            if total_komp_sisa_val > 0:
+                                fig_donut_sisa = go.Figure(data=[go.Pie(
+                                    labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels_sisa],
+                                    values=sub_values_sisa,
+                                    hole=0.45,
+                                    textinfo='percent+label',
+                                    hoverinfo='none',
+                                    textfont_size=11,
+                                    marker=dict(colors=chart_colors[:len(sub_labels_sisa)], line=dict(color='#FFFFFF', width=2))
+                                )])
+                                fig_donut_sisa.update_layout(
+                                    plot_bgcolor="rgba(0,0,0,0)",
+                                    paper_bgcolor="rgba(0,0,0,0)",
+                                    margin=dict(t=20, b=20, l=20, r=20),
+                                    showlegend=False,
+                                    height=280
+                                )
+                                st.plotly_chart(fig_donut_sisa, use_container_width=True)
+                            else:
+                                st.info("Seluruh anggaran sub komponen telah terealisasi secara penuh (Sisa Rp 0).")
                             
                             # 2. Header Tabel Sisa
                             head_s = st.columns([0.5, 4.5, 2.5, 2])
@@ -813,7 +826,8 @@ if file_rab and file_lra_list:
                             # 3. Baris Data Sisa
                             for i, (label_sisa, val_sisa) in enumerate(zip(sub_labels_sisa, sub_values_sisa)):
                                 color_hex_sisa = chart_colors[i % len(chart_colors)]
-                                pct_sisa = (val_sisa / total_komp_sisa_val) * 100
+                                # PERUBAHAN: Menghindari error pembagian dengan 0
+                                pct_sisa = (val_sisa / total_komp_sisa_val * 100) if total_komp_sisa_val > 0 else 0
                                 
                                 row_s = st.columns([0.5, 4.5, 2.5, 2])
                                 with row_s[0]:
@@ -824,8 +838,6 @@ if file_rab and file_lra_list:
                                     st.markdown(f"<span style='font-size:12px; font-weight:500; color:#212529;'>Rp {val_sisa:,.0f}</span>", unsafe_allow_html=True)
                                 with row_s[3]:
                                     st.markdown(f"<span style='font-size:12px; font-weight:600; color:#495057;'>{pct_sisa:.2f}%</span>", unsafe_allow_html=True)
-                        else:
-                            st.info("Seluruh anggaran sub komponen telah terealisasi secara penuh (Sisa Rp 0).")
                             
                 if not has_any_sisa and len(komp_keys_sisa) == 0:
                      st.info("Data sisa anggaran per sub komponen belum tersedia.")

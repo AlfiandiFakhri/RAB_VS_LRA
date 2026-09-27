@@ -171,7 +171,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                 lvl = str(row_lra.get('Level')).strip()
                 uraian = str(row_lra.get('Kode / Uraian', '')).strip()
                 
-                # PERBAIKAN: Gunakan safe_float agar "-" atau NaN tidak diabaikan
+                # Gunakan safe_float agar "-" atau NaN tidak diabaikan
                 pagu = safe_float(row_lra.get('Pagu'))
                 realisasi_sub = safe_float(row_lra.get('Total Realisasi'))
                 sisa_sub = safe_float(row_lra.get('Sisa'))
@@ -195,7 +195,7 @@ def parse_lra_files(file_lra_list, list_semua_bulan):
                             
                         current_stored_real = sub_component_realisasi[current_komp].get(uraian, -1)
                         
-                        # PERBAIKAN: Selalu masukkan jika belum ada, atau jika dari file outstanding, atau jika angkanya lebih besar
+                        # Selalu masukkan jika belum ada, atau jika dari file outstanding, atau jika angkanya lebih besar
                         if is_outstanding_file or uraian not in sub_component_realisasi[current_komp] or realisasi_sub > current_stored_real:
                             sub_component_realisasi[current_komp][uraian] = realisasi_sub
                             sub_component_sisa[current_komp][uraian] = sisa_sub
@@ -655,6 +655,9 @@ if file_rab and file_lra_list:
                 "Realisasi": realisasi_per_bulan
             })
             
+            # FITUR BARU: Konversi ke skala Juta untuk Sumbu Y agar tidak muncul "M" (Million)
+            df_monthly_chart["Realisasi_Juta"] = df_monthly_chart["Realisasi"] / 1_000_000
+            
             def format_rupiah(val):
                 if val > 0:
                     return f"Rp {val:,.0f}".replace(",", ".")
@@ -663,10 +666,10 @@ if file_rab and file_lra_list:
             fig_3d_bar = px.bar(
                 df_monthly_chart,
                 x="Bulan",
-                y="Realisasi",
-                text=df_monthly_chart["Realisasi"].apply(format_rupiah),
+                y="Realisasi_Juta",
+                text=df_monthly_chart["Realisasi"].apply(format_rupiah), # Teks di atas bar tetap angka asli
                 title="Realisasi Anggaran per Bulan",
-                color="Realisasi",
+                color="Realisasi_Juta",
                 color_continuous_scale="Tealgrn"
             )
             fig_3d_bar.update_traces(
@@ -681,7 +684,7 @@ if file_rab and file_lra_list:
                 paper_bgcolor="rgba(0,0,0,0)",
                 font=dict(color="black", size=12),
                 xaxis_title="Bulan",
-                yaxis_title="Total Realisasi (Rp)",
+                yaxis_title="Total Realisasi (Juta Rp)", # Keterangan diubah menjadi Juta Rp
                 height=480,
                 uniformtext_minsize=8, 
                 uniformtext_mode='hide'
@@ -712,7 +715,7 @@ if file_rab and file_lra_list:
                                 continue
                                 
                         if len(sub_dict_filtered) > 0:
-                            sub_labels = sorted(list(sub_dict_filtered.keys())) # Sort agar Sub A, B, C berurutan
+                            sub_labels = sorted(list(sub_dict_filtered.keys())) 
                             sub_values = [sub_dict_filtered[l] for l in sub_labels]
                             total_komp_val = sum(sub_values)
                             
@@ -790,7 +793,7 @@ if file_rab and file_lra_list:
                         
                         if len(sisa_dict_filtered) > 0:
                             has_any_sisa = True
-                            sub_labels_sisa = sorted(list(sisa_dict_filtered.keys())) # Sort agar berurutan A,B,C
+                            sub_labels_sisa = sorted(list(sisa_dict_filtered.keys())) 
                             sub_values_sisa = [sisa_dict_filtered[l] for l in sub_labels_sisa]
                             total_komp_sisa_val = sum(sub_values_sisa)
                             

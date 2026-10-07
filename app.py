@@ -46,27 +46,39 @@ def safe_float(val):
     except (ValueError, TypeError):
         return 0.0
 
-def match_texts_smart(t1, t2):
-    if not t1 or not t2: return False
+def get_similarity_score(t1, t2):
+    if not t1 or not t2: return 0.0
     clean_t1 = normalize_text(t1)
     clean_t2 = normalize_text(t2)
     
-    if len(clean_t1) < 3 or len(clean_t2) < 3:
-        return clean_t1 == clean_t2
+    # 1. Exact Match (Cocok Sempurna)
+    if clean_t1 == clean_t2: return 1.0
     
-    if clean_t1 == clean_t2 or clean_t1 in clean_t2 or clean_t2 in clean_t1: return True
+    # 2. Syarat panjang minimum
+    if len(clean_t1) < 3 or len(clean_t2) < 3:
+        return 1.0 if clean_t1 == clean_t2 else 0.0
         
-    similarity = SequenceMatcher(None, clean_t1, clean_t2).ratio()
-    if similarity >= 0.65: return True
-        
+    # 3. Base Similarity
+    sim = SequenceMatcher(None, clean_t1, clean_t2).ratio()
+    
+    # 4. Word Overlap (Cek irisan kata)
     w1 = set(clean_t1.split())
     w2 = set(clean_t2.split())
     if len(w1) > 0 and len(w2) > 0:
         shorter = w1 if len(w1) < len(w2) else w2
         longer = w2 if len(w1) < len(w2) else w1
         overlap = len(shorter.intersection(longer))
-        if (overlap / len(shorter)) >= 0.70: return True
-    return False
+        
+        overlap_ratio = overlap / len(shorter)
+        # Penalti panjang: Mencegah kata pendek "mencuri" data kata panjang
+        length_penalty = len(shorter) / len(longer) 
+        
+        # Kombinasi skor: Kata harus banyak beririsan dan panjang kalimat mirip
+        combined_score = (overlap_ratio * 0.75) + (length_penalty * 0.25)
+        
+        sim = max(sim, combined_score)
+        
+    return sim
 
 def get_row_pagu(ws, row_idx):
     try:
@@ -310,19 +322,28 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
         
         if bagian_teks:
             uraian_rab = " ".join(bagian_teks)
-            matched_key = None
+            best_match = None
+            highest_score = 0
             kamar_opsi = [kamar_rab_saat_ini, f"{rab_komp}_{rab_sub}_GLOBAL", f"{rab_komp}_GLOBAL_GLOBAL"]
             
             for kamar in kamar_opsi:
                 if kamar in data_realisasi:
                     for key, dict_bulanan in data_realisasi[kamar].items():
-                        if match_texts_smart(key, uraian_rab):
-                            matched_key = (kamar, key)
+                        
+                        score = get_similarity_score(key, uraian_rab)
+                        
+                        if score > highest_score and score >= 0.80:
+                            highest_score = score
+                            best_match = (kamar, key)
+                            
+                        if highest_score == 1.0:
                             break
-                if matched_key: break
+                            
+                if highest_score == 1.0:
+                    break
             
-            if matched_key:
-                kamar_ketemu, key_ketemu = matched_key
+            if best_match:
+                kamar_ketemu, key_ketemu = best_match
                 dict_bulanan = data_realisasi[kamar_ketemu].pop(key_ketemu) 
                 nilai_outstanding = dict_bulanan.pop('OUTSTANDING', 0)
                 

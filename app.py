@@ -265,7 +265,8 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
     baris_header = 13 
     baris_mulai_data = 14
     
-    kolom_baru = ["TOTAL Realisasi", "SISA", "OUT STANDING", "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER", "KETERANGAN"]
+    # PERUBAHAN: Menambahkan "KEGIATAN" ke dalam list kolom_baru
+    kolom_baru = ["TOTAL Realisasi", "SISA", "OUT STANDING", "KEGIATAN", "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER", "KETERANGAN"]
     header_ref = ws.cell(row=baris_header, column=19)
     start_col = 20
     
@@ -286,11 +287,13 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
         else:
             if header_ref.has_style: cell.fill = copy(header_ref.fill)
 
+    # PERUBAHAN: Penyesuaian Lebar Kolom
     ws.column_dimensions[get_column_letter(20)].width = 20.5 
     ws.column_dimensions[get_column_letter(21)].width = 18.2 
     ws.column_dimensions[get_column_letter(22)].width = 18.2 
-    for c_idx in range(23, 35): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 
-    ws.column_dimensions[get_column_letter(35)].width = 35.0 
+    ws.column_dimensions[get_column_letter(23)].width = 20.0 # Lebar kolom KEGIATAN
+    for c_idx in range(24, 36): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 # Bulan geser ke 24-35
+    ws.column_dimensions[get_column_letter(36)].width = 35.0 # KETERANGAN geser ke 36
 
     max_row = ws.max_row
     data_ditemukan = 0
@@ -356,13 +359,17 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                 baris_terpakai.add(target_row)
                 
                 ws.cell(row=target_row, column=22).value = nilai_outstanding
+                # Kolom 23 dibiarkan untuk "KEGIATAN" yang mungkin akan diisi pengguna
+                
                 row_bulanan_val = {}
                 for idx_b, b_name in enumerate(list_semua_bulan):
                     val_b = dict_bulanan[b_name]
-                    ws.cell(row=target_row, column=23 + idx_b).value = val_b
+                    # PERUBAHAN: Indeks kolom bulan digeser ke 24 (Mulai dari X)
+                    ws.cell(row=target_row, column=24 + idx_b).value = val_b
                     row_bulanan_val[b_name] = val_b
                 
-                ws.cell(row=target_row, column=20).value = f"=SUM(W{target_row}:AH{target_row})+V{target_row}"
+                # PERUBAHAN: Rumus SUM total realisasi digeser menyesuaikan letak kolom bulan yang baru (X sampai AI)
+                ws.cell(row=target_row, column=20).value = f"=SUM(X{target_row}:AI{target_row})+V{target_row}"
                 ws.cell(row=target_row, column=21).value = f"=S{target_row}-T{target_row}"
 
                 pagu_val = get_row_pagu(ws, target_row)
@@ -376,7 +383,8 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                 })
 
                 data_ref = ws.cell(row=target_row, column=19)
-                for c_idx in range(20, 36):
+                # PERUBAHAN: Format styling cell digeser sampai index 37 (termasuk kolom Keterangan)
+                for c_idx in range(20, 37):
                     c = ws.cell(row=target_row, column=c_idx)
                     if data_ref.has_style:
                         c.font, c.border, c.alignment, c.number_format = copy(data_ref.font), copy(data_ref.border), copy(data_ref.alignment), copy(data_ref.number_format)

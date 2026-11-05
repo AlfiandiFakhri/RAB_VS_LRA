@@ -51,17 +51,13 @@ def get_similarity_score(t1, t2):
     clean_t1 = normalize_text(t1)
     clean_t2 = normalize_text(t2)
     
-    # 1. Exact Match (Cocok Sempurna)
     if clean_t1 == clean_t2: return 1.0
     
-    # 2. Syarat panjang minimum
     if len(clean_t1) < 3 or len(clean_t2) < 3:
         return 1.0 if clean_t1 == clean_t2 else 0.0
         
-    # 3. Base Similarity
     sim = SequenceMatcher(None, clean_t1, clean_t2).ratio()
     
-    # 4. Word Overlap (Cek irisan kata)
     w1 = set(clean_t1.split())
     w2 = set(clean_t2.split())
     if len(w1) > 0 and len(w2) > 0:
@@ -70,10 +66,8 @@ def get_similarity_score(t1, t2):
         overlap = len(shorter.intersection(longer))
         
         overlap_ratio = overlap / len(shorter)
-        # Penalti panjang: Mencegah kata pendek "mencuri" data kata panjang
         length_penalty = len(shorter) / len(longer) 
         
-        # Kombinasi skor: Kata harus banyak beririsan dan panjang kalimat mirip
         combined_score = (overlap_ratio * 0.75) + (length_penalty * 0.25)
         
         sim = max(sim, combined_score)
@@ -265,14 +259,28 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
     baris_header = 13 
     baris_mulai_data = 14
     
-    # KETERANGAN telah dihapus
-    kolom_baru = ["TOTAL Realisasi", "SISA", "OUT STANDING", "KEGIATAN", "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER"]
+    # -----------------------------------------------------
+    # MENCARI KOLOM 'BLOKIR' DARI FILE RAB SUMBER (DINAMIS)
+    # -----------------------------------------------------
+    sumber_blokir_col_idx = None
+    for r_cek in range(10, 16):  # Mencari di rentang baris 10 hingga 15 (antisipasi header bergeser)
+        for c_cek in range(1, 30): 
+            val_head = ws.cell(row=r_cek, column=c_cek).value
+            if val_head and isinstance(val_head, str) and val_head.strip().lower() == "blokir":
+                sumber_blokir_col_idx = c_cek
+                break
+        if sumber_blokir_col_idx:
+            break
+
+    # PENAMBAHAN KOLOM BLOKIR PADA OUTPUT
+    kolom_baru = ["TOTAL Realisasi", "BLOKIR", "SISA", "OUT STANDING", "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER", "KETERANGAN"]
     header_ref = ws.cell(row=baris_header, column=19)
     start_col = 20
     
     warna_hijau = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
     warna_kuning = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
     warna_orange = PatternFill(start_color="FCD5B4", end_color="FCD5B4", fill_type="solid") 
+    warna_merah_muda = PatternFill(start_color="FF9999", end_color="FF9999", fill_type="solid") 
     
     for i, nama_kolom in enumerate(kolom_baru):
         cell = ws.cell(row=baris_header, column=start_col + i)
@@ -282,19 +290,22 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
             cell.border = copy(header_ref.border)
             cell.alignment = copy(header_ref.alignment)
         if nama_kolom == "TOTAL Realisasi": cell.fill = warna_hijau
+        elif nama_kolom == "BLOKIR": cell.fill = warna_merah_muda
         elif nama_kolom == "SISA": cell.fill = warna_kuning
         elif nama_kolom == "OUT STANDING": cell.fill = warna_orange
         else:
             if header_ref.has_style: cell.fill = copy(header_ref.fill)
 
-    ws.column_dimensions[get_column_letter(20)].width = 20.5 
-    ws.column_dimensions[get_column_letter(21)].width = 18.2 
-    ws.column_dimensions[get_column_letter(22)].width = 18.2 
-    ws.column_dimensions[get_column_letter(23)].width = 20.0 
-    for c_idx in range(24, 36): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 
+    ws.column_dimensions[get_column_letter(20)].width = 20.5 # T (Total Realisasi)
+    ws.column_dimensions[get_column_letter(21)].width = 18.0 # U (Blokir)
+    ws.column_dimensions[get_column_letter(22)].width = 18.2 # V (Sisa)
+    ws.column_dimensions[get_column_letter(23)].width = 18.2 # W (Outstanding)
+    for c_idx in range(24, 36): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 # X s.d AI
+    ws.column_dimensions[get_column_letter(36)].width = 35.0 # AJ
 
     max_row = ws.max_row
     data_ditemukan = 0
+    total_blokir_satker = 0
     rab_komp, rab_sub, rab_akun = "GLOBAL", "GLOBAL", "GLOBAL"
     baris_terpakai = set()
     summary_preview = []
@@ -330,16 +341,12 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
             for kamar in kamar_opsi:
                 if kamar in data_realisasi:
                     for key, dict_bulanan in data_realisasi[kamar].items():
-                        
                         score = get_similarity_score(key, uraian_rab)
-                        
                         if score > highest_score and score >= 0.80:
                             highest_score = score
                             best_match = (kamar, key)
-                            
                         if highest_score == 1.0:
                             break
-                            
                 if highest_score == 1.0:
                     break
             
@@ -356,30 +363,40 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                         break
                 baris_terpakai.add(target_row)
                 
-                ws.cell(row=target_row, column=22).value = nilai_outstanding
+                # EKSTRAK DATA BLOKIR DARI SUMBER RAB
+                nilai_blokir = 0
+                if sumber_blokir_col_idx is not None:
+                    # Mengambil dari baris sejajar (target_row) atau baris asalnya (row_idx)
+                    val_t = safe_float(ws.cell(row=target_row, column=sumber_blokir_col_idx).value)
+                    val_r = safe_float(ws.cell(row=row_idx, column=sumber_blokir_col_idx).value)
+                    nilai_blokir = val_t if val_t != 0 else val_r
                 
+                total_blokir_satker += nilai_blokir
+                
+                ws.cell(row=target_row, column=23).value = nilai_outstanding # W
                 row_bulanan_val = {}
                 for idx_b, b_name in enumerate(list_semua_bulan):
                     val_b = dict_bulanan[b_name]
-                    ws.cell(row=target_row, column=24 + idx_b).value = val_b
+                    ws.cell(row=target_row, column=24 + idx_b).value = val_b # X s.d AI
                     row_bulanan_val[b_name] = val_b
                 
-                ws.cell(row=target_row, column=20).value = f"=SUM(X{target_row}:AI{target_row})+V{target_row}"
-                ws.cell(row=target_row, column=21).value = f"=S{target_row}-T{target_row}"
+                ws.cell(row=target_row, column=21).value = nilai_blokir # U
+                ws.cell(row=target_row, column=20).value = f"=SUM(X{target_row}:AI{target_row})+W{target_row}" # T
+                ws.cell(row=target_row, column=22).value = f"=S{target_row}-T{target_row}-U{target_row}" # V (Pagu - Realisasi - Blokir)
 
                 pagu_val = get_row_pagu(ws, target_row)
                 summary_preview.append({
                     "Komponen": rab_komp,
                     "Uraian": uraian_rab,
                     "Pagu": pagu_val,
+                    "Blokir": nilai_blokir,
                     "Realisasi": sum(row_bulanan_val.values()) + nilai_outstanding,
                     "Outstanding": nilai_outstanding,
                     **row_bulanan_val
                 })
 
                 data_ref = ws.cell(row=target_row, column=19)
-                # Styling diterapkan hingga kolom ke-35 (Desember)
-                for c_idx in range(20, 36):
+                for c_idx in range(20, 37):
                     c = ws.cell(row=target_row, column=c_idx)
                     if data_ref.has_style:
                         c.font, c.border, c.alignment, c.number_format = copy(data_ref.font), copy(data_ref.border), copy(data_ref.alignment), copy(data_ref.number_format)
@@ -388,18 +405,17 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
-    return output.getvalue(), data_ditemukan, pd.DataFrame(summary_preview)
+    return output.getvalue(), data_ditemukan, pd.DataFrame(summary_preview), total_blokir_satker
 
 # ==========================================
 # FUNGSI PEMBUATAN FILE POWERPOINT (PPTX) 
 # ==========================================
-def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, sub_component_realisasi, sub_component_sisa):
+def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, sub_component_realisasi, sub_component_sisa, total_blokir_satker=0):
     prs = Presentation()
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
     blank_layout = prs.slide_layouts[6]
     
-    # --- WARNA TEMA DEEP TEAL ---
     DEEP_TEAL = RGBColor(0, 64, 64)       
     GOLD_ACCENT = RGBColor(218, 165, 32)  
     GREY_TEXT = RGBColor(80, 90, 100)     
@@ -420,9 +436,7 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
         line.fill.fore_color.rgb = GOLD_ACCENT
         line.line.fill.background()
     
-    # ---------------------------------------------------------
     # 1. SLIDE COVER (JUDUL)
-    # ---------------------------------------------------------
     slide1 = prs.slides.add_slide(blank_layout)
     bg = slide1.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0), Inches(0), Inches(13.333), Inches(7.5))
     bg.fill.solid(); bg.fill.fore_color.rgb = DEEP_TEAL; bg.line.fill.background()
@@ -441,34 +455,35 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
     p2.text = "Konsolidasi Anggaran (RAB vs LRA)"
     p2.font.size, p2.font.name, p2.font.color.rgb = Pt(24), "Arial", RGBColor(180, 205, 205)
     
-    # ---------------------------------------------------------
     # 2. SLIDE RINGKASAN EKSEKUTIF 
-    # ---------------------------------------------------------
     slide2 = prs.slides.add_slide(blank_layout)
     add_slide_header(slide2, "Ringkasan Kinerja Anggaran")
     
     total_pagu = satker_summary["pagu"]
     total_realisasi = satker_summary["realisasi"]
-    total_sisa = satker_summary["sisa"]
+    total_sisa_sebelum_blokir = satker_summary["sisa"]
+    sisa_efektif = total_sisa_sebelum_blokir - total_blokir_satker
     persen_nasional = (total_realisasi / total_pagu * 100) if total_pagu > 0 else 0
     
     metrics = [
-        ("Total Pagu Anggaran", f"Rp {total_pagu:,.0f}"),
+        ("Total Pagu", f"Rp {total_pagu:,.0f}"),
+        ("Diblokir", f"Rp {total_blokir_satker:,.0f}"),
         ("Total Realisasi", f"Rp {total_realisasi:,.0f}"),
-        ("Sisa Anggaran", f"Rp {total_sisa:,.0f}"),
-        ("Tingkat Penyerapan", f"{persen_nasional:.2f}%")
+        ("Sisa Efektif", f"Rp {sisa_efektif:,.0f}"),
+        ("Penyerapan", f"{persen_nasional:.2f}%")
     ]
     
+    card_width = 2.2
     for i, (label, value) in enumerate(metrics):
-        card = slide2.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.8 + (i * 3.0)), Inches(1.5), Inches(2.8), Inches(1.1))
+        card = slide2.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.8 + (i * 2.35)), Inches(1.5), Inches(card_width), Inches(1.1))
         card.fill.solid(); card.fill.fore_color.rgb = LIGHT_BG; card.line.color.rgb = RGBColor(220, 225, 230)
         c_tf = card.text_frame; c_tf.clear()
         
         c_p1 = c_tf.paragraphs[0]
-        c_p1.text, c_p1.font.size, c_p1.font.color.rgb = label, Pt(12), GREY_TEXT
+        c_p1.text, c_p1.font.size, c_p1.font.color.rgb = label, Pt(11), GREY_TEXT
         
         c_p2 = c_tf.add_paragraph()
-        c_p2.text, c_p2.font.size, c_p2.font.bold, c_p2.font.color.rgb = value, Pt(18), True, DEEP_TEAL
+        c_p2.text, c_p2.font.size, c_p2.font.bold, c_p2.font.color.rgb = value, Pt(16), True, DEEP_TEAL
     
     if component_metrics:
         p_c = slide2.shapes.add_textbox(Inches(0.8), Inches(2.9), Inches(11.7), Inches(0.5)).text_frame.paragraphs[0]
@@ -495,9 +510,7 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
                 p = cell.text_frame.paragraphs[0]
                 p.font.color.rgb, p.font.size = GREY_TEXT, Pt(11)
 
-    # ---------------------------------------------------------
     # 3. SLIDE GRAFIK TREN BULANAN
-    # ---------------------------------------------------------
     slide3 = prs.slides.add_slide(blank_layout)
     add_slide_header(slide3, "Tren Penyerapan Anggaran Bulanan")
     
@@ -523,17 +536,12 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
     img_buf = io.BytesIO(); fig_m.savefig(img_buf, format='png', dpi=300, bbox_inches='tight', transparent=True); plt.close(fig_m); img_buf.seek(0)
     slide3.shapes.add_picture(img_buf, Inches(0.5), Inches(1.5), width=Inches(12.0))
     
-    # ---------------------------------------------------------
-    # 4. SLIDE RINCIAN SUB KOMPONEN (REALISASI & SISA)
-    # ---------------------------------------------------------
+    # 4. SLIDE RINCIAN SUB KOMPONEN
     semua_komponen_unik = sorted(list(set(list(sub_component_realisasi.keys()) + list(sub_component_sisa.keys()))))
     
     for komp_name in semua_komponen_unik:
-        
-        # ---- SLIDE: REALISASI SUB KOMPONEN ----
         if komp_name in sub_component_realisasi:
             sub_dict_real_table = {k: float(v) for k, v in sub_component_realisasi[komp_name].items() if pd.notna(v) and float(v) >= 0}
-            
             if sub_dict_real_table:
                 slide_sub = prs.slides.add_slide(blank_layout)
                 add_slide_header(slide_sub, f"Realisasi Sub Komponen: {komp_name}")
@@ -545,21 +553,10 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
                 if total_komp_chart > 0:
                     fig_p, ax_p = plt.subplots(figsize=(6, 5))
                     colors_real = ['#004040', '#006666', '#008080', '#20B2AA', '#48D1CC', '#5F9EA0', '#8FBC8F']
-                    
                     labels_with_pct = [f"Sub {l.split('-')[0].strip()}\n({val/total_komp_chart*100:.1f}%)" for l, val in zip(sub_labels_chart, sub_vals_chart)]
-                    
-                    wedges, texts = ax_p.pie(
-                        sub_vals_chart, 
-                        labels=labels_with_pct, 
-                        startangle=90, 
-                        colors=colors_real, 
-                        wedgeprops=dict(width=0.4, edgecolor='w'),
-                        labeldistance=1.05
-                    )
-                    
+                    wedges, texts = ax_p.pie(sub_vals_chart, labels=labels_with_pct, startangle=90, colors=colors_real, wedgeprops=dict(width=0.4, edgecolor='w'), labeldistance=1.05)
                     plt.setp(texts, size=10, weight="bold", color="#333333")
                     ax_p.axis('equal'); plt.tight_layout()
-                    
                     pie_buf = io.BytesIO(); fig_p.savefig(pie_buf, format='png', dpi=300, bbox_inches='tight', transparent=True); plt.close(fig_p); pie_buf.seek(0)
                     slide_sub.shapes.add_picture(pie_buf, Inches(0.5), Inches(1.8), width=Inches(5.0))
                 else:
@@ -589,10 +586,8 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
                         p = cell.text_frame.paragraphs[0]
                         p.font.color.rgb, p.font.size = GREY_TEXT, Pt(11)
 
-        # ---- SLIDE: SISA ANGGARAN SUB KOMPONEN ----
         if komp_name in sub_component_sisa:
             sub_dict_sisa_table = {k: float(v) for k, v in sub_component_sisa[komp_name].items() if pd.notna(v) and float(v) >= 0}
-            
             if sub_dict_sisa_table:
                 slide_sisa = prs.slides.add_slide(blank_layout)
                 add_slide_header(slide_sisa, f"Sisa Anggaran Sub Komponen: {komp_name}")
@@ -604,21 +599,10 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
                 if total_komp_s_chart > 0:
                     fig_s, ax_s = plt.subplots(figsize=(6, 5))
                     colors_sisa = ['#DAA520', '#CD853F', '#D2691E', '#B8860B', '#8B4513', '#A0522D', '#D2B48C']
-                    
                     labels_s_with_pct = [f"Sub {l.split('-')[0].strip()}\n({val/total_komp_s_chart*100:.1f}%)" for l, val in zip(sub_labels_s_chart, sub_vals_s_chart)]
-                    
-                    wedges_s, texts_s = ax_s.pie(
-                        sub_vals_s_chart, 
-                        labels=labels_s_with_pct, 
-                        startangle=90, 
-                        colors=colors_sisa, 
-                        wedgeprops=dict(width=0.4, edgecolor='w'),
-                        labeldistance=1.05
-                    )
-                    
+                    wedges_s, texts_s = ax_s.pie(sub_vals_s_chart, labels=labels_s_with_pct, startangle=90, colors=colors_sisa, wedgeprops=dict(width=0.4, edgecolor='w'), labeldistance=1.05)
                     plt.setp(texts_s, size=10, weight="bold", color="#333333")
                     ax_s.axis('equal'); plt.tight_layout()
-                    
                     pie_buf_s = io.BytesIO(); fig_s.savefig(pie_buf_s, format='png', dpi=300, bbox_inches='tight', transparent=True); plt.close(fig_s); pie_buf_s.seek(0)
                     slide_sisa.shapes.add_picture(pie_buf_s, Inches(0.5), Inches(1.8), width=Inches(5.0))
                 else:
@@ -680,12 +664,12 @@ if file_rab and file_lra_list:
                 
                 data_realisasi, satker_summary, monthly_totals, component_summary, component_metrics, sub_component_realisasi, sub_component_sisa = parse_lra_files_cached(lra_files_tuple, list_bulan_tuple)
                 
-                st.write("Menyelaraskan ...")
+                st.write("Menyelaraskan dengan RAB & Mengekstrak Kolom Blokir...")
                 rab_bytes = file_rab.getvalue()
-                output_excel_bytes, data_ditemukan, df_preview = process_rab_lra_cached(rab_bytes, data_realisasi, list_bulan_tuple)
+                output_excel_bytes, data_ditemukan, df_preview, total_blokir_satker = process_rab_lra_cached(rab_bytes, data_realisasi, list_bulan_tuple)
                 
                 st.write("Menyiapkan dokumen presentasi PowerPoint (.pptx)...")
-                ppt_output_bytes = create_powerpoint_report(satker_summary, component_metrics, monthly_totals, sub_component_realisasi, sub_component_sisa)
+                ppt_output_bytes = create_powerpoint_report(satker_summary, component_metrics, monthly_totals, sub_component_realisasi, sub_component_sisa, total_blokir_satker)
                 
                 status.update(label="Proses Selesai!", state="complete", expanded=False)
 
@@ -696,14 +680,18 @@ if file_rab and file_lra_list:
             # DASHBOARD EXECUTIVE SUMMARY METRICS
             # ==========================================
             st.subheader("📈 Executive Summary")
-            total_pagu_all = satker_summary["pagu"]; total_realisasi_incl_out = satker_summary["realisasi"]; total_sisa_all = satker_summary["sisa"]
+            total_pagu_all = satker_summary["pagu"]
+            total_realisasi_incl_out = satker_summary["realisasi"]
+            total_sisa_awal = satker_summary["sisa"]
+            total_sisa_efektif = total_sisa_awal - total_blokir_satker
             persen_nasional = (total_realisasi_incl_out / total_pagu_all * 100) if total_pagu_all > 0 else 0
 
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("💰 Total Pagu Anggaran", f"Rp {total_pagu_all:,.0f}")
-            m2.metric("📉 Total Realisasi", f"Rp {total_realisasi_incl_out:,.0f}")
-            m3.metric("🟡 Sisa Anggaran", f"Rp {total_sisa_all:,.0f}")
-            m4.metric("📊 Persentase", f"{persen_nasional:.2f}%")
+            m1, m2, m3, m4, m5 = st.columns(5)
+            m1.metric("💰 Total Pagu", f"Rp {total_pagu_all:,.0f}")
+            m2.metric("🛑 Diblokir", f"Rp {total_blokir_satker:,.0f}")
+            m3.metric("📉 Total Realisasi", f"Rp {total_realisasi_incl_out:,.0f}")
+            m4.metric("🟡 Sisa Efektif", f"Rp {total_sisa_efektif:,.0f}")
+            m5.metric("📊 Persentase", f"{persen_nasional:.2f}%")
 
             if component_metrics:
                 st.markdown("---")

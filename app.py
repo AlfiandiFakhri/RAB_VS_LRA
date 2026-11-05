@@ -42,7 +42,7 @@ def safe_float(val):
         if isinstance(val, str):
             val = val.replace(',', '').strip()
             if val == '-' or val == '': return 0.0
-            if val.startswith('='): return 0.0 # Pencegahan jika rumus tidak terevaluasi
+            if val.startswith('='): return 0.0 
         return float(val)
     except (ValueError, TypeError):
         return 0.0
@@ -157,57 +157,46 @@ def parse_lra_files_cached(lra_files_input, list_semua_bulan):
 def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
     file_rab_io = io.BytesIO(rab_bytes)
     
-    # PERBAIKAN UTAMA: Muat data dua kali. wb_data khusus untuk mengambil nilai hasil rumus (angka pagu)
+    # Ambil nilai evaluasi formula untuk Pagu (Kolom S), Blokir (Kolom T), Pagu setelah Blokir (Kolom U)
     wb_data = load_workbook(file_rab_io, data_only=True)
     ws_data = wb_data.active
     
-    # Buka workbook asli (tanpa data_only) untuk mempertahankan rumus bawaan Anda
     file_rab_io.seek(0)
     wb = load_workbook(file_rab_io)
     ws = wb.active 
     
     ws.title = "DATA"
-    
     baris_header = 13 
     baris_mulai_data = 14
     max_row = ws.max_row
     
-    # Pindahkan keterangan asli (dari kolom T) ke kolom AK agar tidak tertimpa
-    for r in range(1, max_row + 1):
-        ket_val = ws.cell(row=r, column=20).value
-        ws.cell(row=r, column=37).value = ket_val
+    # Kolom baru dimulai dari V (index 22)
+    kolom_baru = ["TOTAL Realisasi", "SISA", "OUT STANDING", "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER"]
     
-    kolom_baru = ["BLOKIR", "PAGU EFEKTIF", "TOTAL Realisasi", "SISA", "OUT STANDING", "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER"]
-    
-    warna_merah = PatternFill(start_color="FF9999", end_color="FF9999", fill_type="solid")
-    warna_biru = PatternFill(start_color="99CCFF", end_color="99CCFF", fill_type="solid")
     warna_hijau = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
     warna_kuning = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
     warna_orange = PatternFill(start_color="FCD5B4", end_color="FCD5B4", fill_type="solid") 
     
-    header_ref = ws.cell(row=baris_header, column=19) 
+    header_ref = ws.cell(row=baris_header, column=21) # Referensi dari kolom U (Pagu setelah Blokir)
     
-    start_col = 20
+    start_col = 22
     for i, nama_kolom in enumerate(kolom_baru):
         cell = ws.cell(row=baris_header, column=start_col + i)
         cell.value = nama_kolom
         if header_ref.has_style:
             cell.font, cell.border, cell.alignment = copy(header_ref.font), copy(header_ref.border), copy(header_ref.alignment)
-        if nama_kolom == "BLOKIR": cell.fill = warna_merah
-        elif nama_kolom == "PAGU EFEKTIF": cell.fill = warna_biru
-        elif nama_kolom == "TOTAL Realisasi": cell.fill = warna_hijau
+        if nama_kolom == "TOTAL Realisasi": cell.fill = warna_hijau
         elif nama_kolom == "SISA": cell.fill = warna_kuning
         elif nama_kolom == "OUT STANDING": cell.fill = warna_orange
         else:
             if header_ref.has_style: cell.fill = copy(header_ref.fill)
 
-    ws.column_dimensions[get_column_letter(20)].width = 18.0 
-    ws.column_dimensions[get_column_letter(21)].width = 18.0 
-    ws.column_dimensions[get_column_letter(22)].width = 20.5 
-    ws.column_dimensions[get_column_letter(23)].width = 18.2 
-    ws.column_dimensions[get_column_letter(24)].width = 18.2 
-    for c_idx in range(25, 37): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 
-    ws.column_dimensions[get_column_letter(37)].width = 35.0 
+    # Lebar Kolom
+    ws.column_dimensions[get_column_letter(22)].width = 20.5 # V: Total Realisasi
+    ws.column_dimensions[get_column_letter(23)].width = 18.2 # W: Sisa
+    ws.column_dimensions[get_column_letter(24)].width = 18.2 # X: Outstanding
+    for c_idx in range(25, 37): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 # Y s/d AJ
+    ws.column_dimensions[get_column_letter(37)].width = 35.0 # AK: Keterangan
 
     data_ditemukan = 0
     rab_komp, rab_sub, rab_akun = "GLOBAL", "GLOBAL", "GLOBAL"
@@ -221,9 +210,9 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
     sub_component_realisasi = {}
     sub_component_sisa = {} 
     
-    # AMBIL ANGKA TOTAL DARI ws_data (TIDAK LAGI MEMBACA STRING RUMUS)
+    # Ambil Total Satker dari Baris 14 (Col S = Pagu, Col T = Blokir)
     satker_pagu = safe_float(ws_data.cell(row=14, column=19).value)
-    satker_blokir = 0 
+    satker_blokir = safe_float(ws_data.cell(row=14, column=20).value)
     
     current_komponen_name = ""
     current_subkomponen_name = ""
@@ -232,19 +221,10 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
         kode_col = str(ws.cell(row=row_idx, column=2).value).strip()
         sub_col = str(ws.cell(row=row_idx, column=4).value).strip()
         
-        # Ekstrak data Pagu per baris DARI ws_data
+        # Ambil Pagu & Blokir dari ws_data
         row_pagu = safe_float(ws_data.cell(row=row_idx, column=19).value)
-        row_blokir = 0
-        
-        ws.cell(row=row_idx, column=20).value = row_blokir
-        if row_pagu > 0:
-            ws.cell(row=row_idx, column=21).value = f"=S{row_idx}-T{row_idx}"
-        
-        data_ref = ws.cell(row=row_idx, column=19)
-        if data_ref.has_style:
-            for c_idx in range(20, 38):
-                c = ws.cell(row=row_idx, column=c_idx)
-                c.font, c.border, c.alignment, c.number_format = copy(data_ref.font), copy(data_ref.border), copy(data_ref.alignment), copy(data_ref.number_format)
+        row_blokir = safe_float(ws_data.cell(row=row_idx, column=20).value)
+        pagu_efektif_row = row_pagu - row_blokir
 
         if kode_col.isdigit() and len(kode_col) == 3: 
             rab_komp = kode_col
@@ -266,7 +246,7 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                     sub_component_realisasi[current_komponen_name] = {}
                     sub_component_sisa[current_komponen_name] = {}
                 sub_component_realisasi[current_komponen_name][current_subkomponen_name] = 0
-                sub_component_sisa[current_komponen_name][current_subkomponen_name] = row_pagu - row_blokir
+                sub_component_sisa[current_komponen_name][current_subkomponen_name] = pagu_efektif_row
                 
         elif kode_col.isdigit() and len(kode_col) == 6: 
             rab_akun = kode_col
@@ -305,15 +285,15 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                         break
                 baris_terpakai.add(target_row)
                 
-                ws.cell(row=target_row, column=24).value = nilai_outstanding 
+                ws.cell(row=target_row, column=24).value = nilai_outstanding # X: Outstanding
                 total_realisasi_baris = nilai_outstanding
                 for idx_b, b_name in enumerate(list_semua_bulan):
                     val_b = dict_bulanan[b_name]
-                    ws.cell(row=target_row, column=25 + idx_b).value = val_b 
+                    ws.cell(row=target_row, column=25 + idx_b).value = val_b # Y sd AJ
                     total_realisasi_baris += val_b
                 
-                ws.cell(row=target_row, column=22).value = f"=SUM(Y{target_row}:AJ{target_row})+X{target_row}"
-                ws.cell(row=target_row, column=23).value = f"=U{target_row}-V{target_row}"
+                ws.cell(row=target_row, column=22).value = f"=SUM(Y{target_row}:AJ{target_row})+X{target_row}" # V: Total Realisasi
+                ws.cell(row=target_row, column=23).value = f"=U{target_row}-V{target_row}" # W: Sisa (Pagu Setelah Blokir - Total Realisasi)
 
                 data_ditemukan += 1
                 
@@ -560,7 +540,7 @@ if file_rab and file_lra_list:
                 list_bulan_tuple = tuple(list_semua_bulan)
                 data_realisasi, monthly_totals = parse_lra_files_cached(lra_files_tuple, list_bulan_tuple)
                 
-                st.write("Menyelaraskan dengan RAB & Mengekstrak Kalkulasi Pagu...")
+                st.write("Menyelaraskan dengan RAB & Membaca Kolom Pagu / Blokir Asli...")
                 rab_bytes = file_rab.getvalue()
                 output_excel_bytes, data_ditemukan, satker_summary, component_metrics, sub_component_realisasi, sub_component_sisa = process_rab_lra_cached(rab_bytes, data_realisasi, list_bulan_tuple)
                 
@@ -569,7 +549,7 @@ if file_rab and file_lra_list:
                 
                 status.update(label="Proses Selesai!", state="complete", expanded=False)
 
-            st.success(f"🎉 SUKSES! Angka Pagu berhasil diekstrak dan diselaraskan secara akurat.")
+            st.success(f"🎉 SUKSES! Kolom RAB asli terjaga dan data sinkron dengan LRA.")
             st.divider()
 
             st.subheader("📈 Executive Summary")

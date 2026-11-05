@@ -135,7 +135,6 @@ def parse_lra_files_cached(lra_files_input, list_semua_bulan):
                 match = re.search(r'(\d{6})\s*-', uraian)
                 if match: cur_akun = match.group(1)
             
-            # Hirarki Kunci Kamar: Komponen -> Sub Komponen -> Akun
             kamar_unik = f"{cur_komp}_{cur_sub}_{cur_akun}"
             if kamar_unik not in data_realisasi: data_realisasi[kamar_unik] = {}
                 
@@ -222,7 +221,6 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
         row_blokir = safe_float(ws_data.cell(row=row_idx, column=20).value)
         pagu_efektif_row = row_pagu - row_blokir
 
-        # 1. Deteksi Komponen Utama (3 digit, cth: 051, 052)
         if kode_col.isdigit() and len(kode_col) == 3: 
             rab_komp = kode_col
             rab_sub, rab_akun = "GLOBAL", "GLOBAL"
@@ -232,7 +230,6 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
             if current_komponen_name not in component_metrics:
                 component_metrics[current_komponen_name] = {"pagu": row_pagu, "blokir": row_blokir, "realisasi": 0, "sisa": 0, "persen": 0}
 
-        # 2. Deteksi Sub Komponen (A, B, C, D, E)
         elif re.match(r'^[A-Z]\.?\s*$', sub_col):
             rab_sub = sub_col.replace('.', '').strip()
             rab_akun = "GLOBAL" 
@@ -246,13 +243,11 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                 sub_component_realisasi[current_komponen_name][current_subkomponen_name] = 0
                 sub_component_sisa[current_komponen_name][current_subkomponen_name] = pagu_efektif_row
                 
-        # 3. Deteksi Kode Akun 6 Digit (cth: 521211, 522151)
         elif kode_col.isdigit() and len(kode_col) == 6: 
             rab_akun = kode_col
             
         kamar_rab_saat_ini = f"{rab_komp}_{rab_sub}_{rab_akun}"
         
-        # Abaikan baris header komponen/sub-komponen agar tidak double-counting
         is_header_row = (len(kode_col) == 3 or re.match(r'^[A-Z]\.?\s*$', sub_col) or kode_col in ['044.01.EB', '7475', '7475.QDG', '7475.QDG.001'])
         
         bagian_teks = []
@@ -266,15 +261,12 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
             uraian_rab = " ".join(bagian_teks)
             best_match = None
             highest_score = 0
-            
-            # Prioritas pencarian kamar hierarki berlapis (Akun spesifik -> Sub Komponen Global -> Komponen Global)
             kamar_opsi = [kamar_rab_saat_ini, f"{rab_komp}_{rab_sub}_GLOBAL", f"{rab_komp}_GLOBAL_GLOBAL"]
             
             for kamar in kamar_opsi:
                 if kamar in data_realisasi:
                     for key, dict_bulanan in data_realisasi[kamar].items():
                         score = get_similarity_score(key, uraian_rab)
-                        # Syarat pencocokan variabel teks uraian dan akun harus selaras
                         if score > highest_score and score >= 0.75:
                             highest_score = score
                             best_match = (kamar, key)
@@ -300,9 +292,8 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                     ws.cell(row=target_row, column=25 + idx_b).value = val_b 
                     total_realisasi_baris += val_b
                 
-                # Penulisan rumus Excel baku
-                ws.cell(row=target_row, column=22).value = f"=SUM(Y{target_row}:AJ{target_row})+X{target_row}" # V: Total Realisasi
-                ws.cell(row=target_row, column=23).value = f"=U{target_row}-V{target_row}" # W: Sisa
+                ws.cell(row=target_row, column=22).value = f"=SUM(Y{target_row}:AJ{target_row})+X{target_row}" 
+                ws.cell(row=target_row, column=23).value = f"=U{target_row}-V{target_row}" 
 
                 data_ditemukan += 1
                 
@@ -315,6 +306,30 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                 if current_komponen_name in sub_component_realisasi and current_subkomponen_name:
                     if current_subkomponen_name in sub_component_realisasi[current_komponen_name]:
                         sub_component_realisasi[current_komponen_name][current_subkomponen_name] += total_realisasi_baris
+
+    # OTOMATIS ISI BARIS INDUK (COMPONENT & SUB-COMPONENT) MENGGUNAKAN RUMUS SUM DI EXCEL
+    # Berdasarkan struktur RAB asli, kolom Pagu (Kolom 19) sudah memiliki rumus SUM dari file aslinya.
+    # Kita berikan rumus SUM yang identik untuk Kolom V sampai AJ pada baris Komponen dan Sub-Komponen.
+    for r in range(baris_mulai_data, max_row + 1):
+        r_kode = str(ws.cell(row=r, column=2).value).strip()
+        r_sub = str(ws.cell(row=r, column=4).value).strip()
+        
+        # Jika baris Komponen (3 digit) atau Sub Komponen (A., B., C., dll)
+        if (r_kode.isdigit() and len(r_kode) == 3) or re.match(r'^[A-Z]\.?\s*$', r_sub) or r_kode in ['044.01.EB', '7475', '7475.QDG', '7475.QDG.001']:
+            # Cek formula Pagu di kolom 19 (S) untuk melihat anak-anak barisnya
+            s_formula = str(ws_data.cell(row=r, column=19).value)
+            if s_formula.startswith('='):
+                # Ekstrak rentang sel dari formula aslinya (cth: =SUM(S19:S62) -> ambil S19:S62 dan ubah huruf kolomnya menjadi V, W, X, Y hingga AJ)
+                match_range = re.search(r'([A-Z]+\d+:[A-Z]+\d+)', s_formula)
+                if match_range:
+                    orig_range = match_range.group(1)
+                    # Ganti huruf kolom S dengan V, X, Y, dst.
+                    for c_target in range(22, 37):
+                        col_let = get_column_letter(c_target)
+                        new_range = re.sub(r'[A-Z]+', col_let, orig_range)
+                        ws.cell(row=r, column=c_target).value = f"=SUM({new_range})"
+                    # Untuk kolom Sisa (W = Kolom 23), rumusnya adalah =U{r}-V{r}
+                    ws.cell(row=r, column=23).value = f"=U{r}-V{r}"
                         
     satker_summary["pagu"] = satker_pagu
     satker_summary["blokir"] = satker_blokir
@@ -525,7 +540,7 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
     return ppt_output.getvalue()
 
 st.title("📊 LAPORAN REALISASI")
-st.markdown("**Executive Summary (Hierarchical Matching)**")
+st.markdown("**Executive Summary (Hierarchical Aggregation)**")
 st.divider()
 
 col1, col2 = st.columns(2)
@@ -543,13 +558,13 @@ if file_rab and file_lra_list:
         list_semua_bulan = ['JANUARI', 'FEBRUARI', 'MARET', 'APRIL', 'MEI', 'JUNI', 'JULI', 'AGUSTUS', 'SEPTEMBER', 'OKTOBER', 'NOVEMBER', 'DESEMBER']
         
         try:
-            with st.status("Sedang memproses hierarki dokumen dan menyusun ringkasan...", expanded=True) as status:
+            with st.status("Sedang memproses hierarki dokumen dan mengisi baris induk...", expanded=True) as status:
                 st.write("Mengekstrak data dari seluruh LRA berdasarkan struktur hirarki...")
                 lra_files_tuple = tuple((f.name, f.getvalue()) for f in file_lra_list)
                 list_bulan_tuple = tuple(list_semua_bulan)
                 data_realisasi, monthly_totals = parse_lra_files_cached(lra_files_tuple, list_bulan_tuple)
                 
-                st.write("Mencocokkan variabel berjenjang (Komponen -> Sub Komponen -> Akun)...")
+                st.write("Menerapkan rumus agregasi SUM pada baris Komponen dan Sub Komponen...")
                 rab_bytes = file_rab.getvalue()
                 output_excel_bytes, data_ditemukan, satker_summary, component_metrics, sub_component_realisasi, sub_component_sisa = process_rab_lra_cached(rab_bytes, data_realisasi, list_bulan_tuple)
                 
@@ -558,7 +573,7 @@ if file_rab and file_lra_list:
                 
                 status.update(label="Proses Konsolidasi Selesai!", state="complete", expanded=False)
 
-            st.success(f"🎉 SUKSES! Pencocokan berjenjang berhasil diterapkan secara akurat.")
+            st.success(f"🎉 SUKSES! Baris Komponen dan Sub Komponen kini terisi otomatis secara hierarkis.")
             st.divider()
 
             st.subheader("📈 Executive Summary")

@@ -135,6 +135,7 @@ def parse_lra_files_cached(lra_files_input, list_semua_bulan):
                 match = re.search(r'(\d{6})\s*-', uraian)
                 if match: cur_akun = match.group(1)
             
+            # Hirarki Kunci Kamar: Komponen -> Sub Komponen -> Akun
             kamar_unik = f"{cur_komp}_{cur_sub}_{cur_akun}"
             if kamar_unik not in data_realisasi: data_realisasi[kamar_unik] = {}
                 
@@ -221,6 +222,7 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
         row_blokir = safe_float(ws_data.cell(row=row_idx, column=20).value)
         pagu_efektif_row = row_pagu - row_blokir
 
+        # 1. Deteksi Komponen Utama (3 digit, cth: 051, 052)
         if kode_col.isdigit() and len(kode_col) == 3: 
             rab_komp = kode_col
             rab_sub, rab_akun = "GLOBAL", "GLOBAL"
@@ -230,6 +232,7 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
             if current_komponen_name not in component_metrics:
                 component_metrics[current_komponen_name] = {"pagu": row_pagu, "blokir": row_blokir, "realisasi": 0, "sisa": 0, "persen": 0}
 
+        # 2. Deteksi Sub Komponen (A, B, C, D, E)
         elif re.match(r'^[A-Z]\.?\s*$', sub_col):
             rab_sub = sub_col.replace('.', '').strip()
             rab_akun = "GLOBAL" 
@@ -243,11 +246,13 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                 sub_component_realisasi[current_komponen_name][current_subkomponen_name] = 0
                 sub_component_sisa[current_komponen_name][current_subkomponen_name] = pagu_efektif_row
                 
+        # 3. Deteksi Kode Akun 6 Digit (cth: 521211, 522151)
         elif kode_col.isdigit() and len(kode_col) == 6: 
             rab_akun = kode_col
             
         kamar_rab_saat_ini = f"{rab_komp}_{rab_sub}_{rab_akun}"
         
+        # Abaikan baris header komponen/sub-komponen agar tidak double-counting
         is_header_row = (len(kode_col) == 3 or re.match(r'^[A-Z]\.?\s*$', sub_col) or kode_col in ['044.01.EB', '7475', '7475.QDG', '7475.QDG.001'])
         
         bagian_teks = []
@@ -261,13 +266,16 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
             uraian_rab = " ".join(bagian_teks)
             best_match = None
             highest_score = 0
+            
+            # Prioritas pencarian kamar hierarki berlapis (Akun spesifik -> Sub Komponen Global -> Komponen Global)
             kamar_opsi = [kamar_rab_saat_ini, f"{rab_komp}_{rab_sub}_GLOBAL", f"{rab_komp}_GLOBAL_GLOBAL"]
             
             for kamar in kamar_opsi:
                 if kamar in data_realisasi:
                     for key, dict_bulanan in data_realisasi[kamar].items():
                         score = get_similarity_score(key, uraian_rab)
-                        if score > highest_score and score >= 0.80:
+                        # Syarat pencocokan variabel teks uraian dan akun harus selaras
+                        if score > highest_score and score >= 0.75:
                             highest_score = score
                             best_match = (kamar, key)
                         if highest_score == 1.0: break
@@ -292,7 +300,7 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                     ws.cell(row=target_row, column=25 + idx_b).value = val_b 
                     total_realisasi_baris += val_b
                 
-                # MENGGUNAKAN FORMULA EXCEL BAKU AGAR OTOMATIS TERHITUNG DI MICROSOFT EXCEL
+                # Penulisan rumus Excel baku
                 ws.cell(row=target_row, column=22).value = f"=SUM(Y{target_row}:AJ{target_row})+X{target_row}" # V: Total Realisasi
                 ws.cell(row=target_row, column=23).value = f"=U{target_row}-V{target_row}" # W: Sisa
 
@@ -517,7 +525,7 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
     return ppt_output.getvalue()
 
 st.title("📊 LAPORAN REALISASI")
-st.markdown("**Executive Summary**")
+st.markdown("**Executive Summary (Hierarchical Matching)**")
 st.divider()
 
 col1, col2 = st.columns(2)
@@ -530,27 +538,27 @@ with col2:
 
 if file_rab and file_lra_list:
     st.divider()
-    if st.button("🚀 PROSES", type="primary", use_container_width=True):
+    if st.button("🚀 PROSES KONSOLIDASI", type="primary", use_container_width=True):
         
         list_semua_bulan = ['JANUARI', 'FEBRUARI', 'MARET', 'APRIL', 'MEI', 'JUNI', 'JULI', 'AGUSTUS', 'SEPTEMBER', 'OKTOBER', 'NOVEMBER', 'DESEMBER']
         
         try:
-            with st.status("Sedang memproses dokumen dan menyusun ringkasan...", expanded=True) as status:
-                st.write("Mengekstrak data dari seluruh LRA...")
+            with st.status("Sedang memproses hierarki dokumen dan menyusun ringkasan...", expanded=True) as status:
+                st.write("Mengekstrak data dari seluruh LRA berdasarkan struktur hirarki...")
                 lra_files_tuple = tuple((f.name, f.getvalue()) for f in file_lra_list)
                 list_bulan_tuple = tuple(list_semua_bulan)
                 data_realisasi, monthly_totals = parse_lra_files_cached(lra_files_tuple, list_bulan_tuple)
                 
-                st.write("Menyelaraskan dengan RAB & Menerapkan Formula Excel...")
+                st.write("Mencocokkan variabel berjenjang (Komponen -> Sub Komponen -> Akun)...")
                 rab_bytes = file_rab.getvalue()
                 output_excel_bytes, data_ditemukan, satker_summary, component_metrics, sub_component_realisasi, sub_component_sisa = process_rab_lra_cached(rab_bytes, data_realisasi, list_bulan_tuple)
                 
                 st.write("Menyiapkan dokumen presentasi PowerPoint (.pptx)...")
                 ppt_output_bytes = create_powerpoint_report(satker_summary, component_metrics, monthly_totals, sub_component_realisasi, sub_component_sisa)
                 
-                status.update(label="Proses Selesai!", state="complete", expanded=False)
+                status.update(label="Proses Konsolidasi Selesai!", state="complete", expanded=False)
 
-            st.success(f"🎉 SUKSES! Formula Excel Total Realisasi & Sisa kini terisi otomatis dan akurat.")
+            st.success(f"🎉 SUKSES! Pencocokan berjenjang berhasil diterapkan secara akurat.")
             st.divider()
 
             st.subheader("📈 Executive Summary")

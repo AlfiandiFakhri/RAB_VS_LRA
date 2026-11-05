@@ -37,14 +37,17 @@ def normalize_text(text):
     return t
 
 def safe_float(val):
-    if pd.isna(val): return 0.0
+    if pd.isna(val) or val is None: return 0.0
     try:
+        if isinstance(val, (int, float)):
+            return float(val)
         if isinstance(val, str):
-            val = val.replace(',', '').strip()
+            val = val.replace(',', '').replace('Rp', '').strip()
             if val == '-' or val == '': return 0.0
-        return float(val)
+            return float(val)
     except (ValueError, TypeError):
-        return 0.0
+        pass
+    return 0.0
 
 def get_similarity_score(t1, t2):
     if not t1 or not t2: return 0.0
@@ -70,10 +73,7 @@ def get_similarity_score(t1, t2):
         overlap = len(shorter.intersection(longer))
         
         overlap_ratio = overlap / len(shorter)
-        # Penalti panjang: Mencegah kata pendek "mencuri" data kata panjang
         length_penalty = len(shorter) / len(longer) 
-        
-        # Kombinasi skor: Kata harus banyak beririsan dan panjang kalimat mirip
         combined_score = (overlap_ratio * 0.75) + (length_penalty * 0.25)
         
         sim = max(sim, combined_score)
@@ -266,6 +266,7 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan, ra
     # Memuat RAB Versi Blokir (Jika ada)
     ws_blokir = None
     if rab_blokir_bytes:
+        # data_only=True memaksa openpyxl menarik angka hasil kalkulasi (bukan teks formula)
         wb_blokir = load_workbook(io.BytesIO(rab_blokir_bytes), data_only=True)
         ws_blokir = wb_blokir.active
 
@@ -341,16 +342,12 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan, ra
             for kamar in kamar_opsi:
                 if kamar in data_realisasi:
                     for key, dict_bulanan in data_realisasi[kamar].items():
-                        
                         score = get_similarity_score(key, uraian_rab)
-                        
                         if score > highest_score and score >= 0.80:
                             highest_score = score
                             best_match = (kamar, key)
-                            
                         if highest_score == 1.0:
                             break
-                            
                 if highest_score == 1.0:
                     break
             
@@ -371,10 +368,11 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan, ra
                 ws.cell(row=target_row, column=22).value = nilai_outstanding
                 
                 # ==========================================
-                # BACA ANGKA BLOKIR DARI KOLOM 20 (T) FILE KEDUA
+                # BACA ANGKA BLOKIR MUTLAK DARI KOLOM 20 (T)
                 # ==========================================
                 nilai_blokir = 0
                 if ws_blokir:
+                    # Langsung tembak ke Kolom 20 (T) tanpa kompromi
                     val_blokir_raw = ws_blokir.cell(row=row_idx, column=20).value
                     nilai_blokir = safe_float(val_blokir_raw)
                 
@@ -682,7 +680,7 @@ with col1:
     
     # TAMBAHAN FITUR: Uploader RAB khusus Blokir
     st.info("File RAB Versi Blokir (Opsional)")
-    file_rab_blokir = st.file_uploader("Upload Excel RAB Blokir (Angka Blokir di Kolom T)", type=['xlsx', 'xls'], key="rab_blokir")
+    file_rab_blokir = st.file_uploader("Upload Excel RAB Blokir (Pastikan nilai di Kolom T)", type=['xlsx', 'xls'], key="rab_blokir")
 
 with col2:
     st.info("File LRA")

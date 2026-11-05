@@ -265,13 +265,15 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
     baris_header = 13 
     baris_mulai_data = 14
     
-    kolom_baru = ["TOTAL Realisasi", "SISA", "OUT STANDING", "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER", "KETERANGAN"]
+    # Penambahan kolom BLOKIR ANGGARAN
+    kolom_baru = ["TOTAL Realisasi", "SISA", "OUT STANDING", "BLOKIR ANGGARAN", "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER", "KETERANGAN"]
     header_ref = ws.cell(row=baris_header, column=19)
     start_col = 20
     
     warna_hijau = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
     warna_kuning = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
     warna_orange = PatternFill(start_color="FCD5B4", end_color="FCD5B4", fill_type="solid") 
+    warna_merah_muda = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid") # Warna untuk blokir
     
     for i, nama_kolom in enumerate(kolom_baru):
         cell = ws.cell(row=baris_header, column=start_col + i)
@@ -280,17 +282,21 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
             cell.font = copy(header_ref.font)
             cell.border = copy(header_ref.border)
             cell.alignment = copy(header_ref.alignment)
+            
         if nama_kolom == "TOTAL Realisasi": cell.fill = warna_hijau
         elif nama_kolom == "SISA": cell.fill = warna_kuning
         elif nama_kolom == "OUT STANDING": cell.fill = warna_orange
+        elif nama_kolom == "BLOKIR ANGGARAN": cell.fill = warna_merah_muda
         else:
             if header_ref.has_style: cell.fill = copy(header_ref.fill)
 
-    ws.column_dimensions[get_column_letter(20)].width = 20.5 
-    ws.column_dimensions[get_column_letter(21)].width = 18.2 
-    ws.column_dimensions[get_column_letter(22)].width = 18.2 
-    for c_idx in range(23, 35): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 
-    ws.column_dimensions[get_column_letter(35)].width = 35.0 
+    # Penyesuaian Lebar Kolom
+    ws.column_dimensions[get_column_letter(20)].width = 20.5 # Total Realisasi
+    ws.column_dimensions[get_column_letter(21)].width = 18.2 # Sisa
+    ws.column_dimensions[get_column_letter(22)].width = 18.2 # Outstanding
+    ws.column_dimensions[get_column_letter(23)].width = 18.2 # Blokir Anggaran
+    for c_idx in range(24, 36): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 # Bulan-bulan
+    ws.column_dimensions[get_column_letter(36)].width = 35.0 # Keterangan
 
     max_row = ws.max_row
     data_ditemukan = 0
@@ -356,14 +362,18 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                 baris_terpakai.add(target_row)
                 
                 ws.cell(row=target_row, column=22).value = nilai_outstanding
+                ws.cell(row=target_row, column=23).value = 0 # Inisialisasi awal Blokir = 0
+                
                 row_bulanan_val = {}
                 for idx_b, b_name in enumerate(list_semua_bulan):
                     val_b = dict_bulanan[b_name]
-                    ws.cell(row=target_row, column=23 + idx_b).value = val_b
+                    ws.cell(row=target_row, column=24 + idx_b).value = val_b # Indeks bulan tergeser jadi mulai di kolom 24
                     row_bulanan_val[b_name] = val_b
                 
-                ws.cell(row=target_row, column=20).value = f"=SUM(W{target_row}:AH{target_row})+V{target_row}"
-                ws.cell(row=target_row, column=21).value = f"=S{target_row}-T{target_row}"
+                # Rumus Total Realisasi menjumlahkan kolom X (Jan) hingga AI (Des) + V (Outstanding)
+                ws.cell(row=target_row, column=20).value = f"=SUM(X{target_row}:AI{target_row})+V{target_row}"
+                # Rumus Sisa mengurangi Pagu (S) dengan Total Realisasi (T) dan Blokir Anggaran (W)
+                ws.cell(row=target_row, column=21).value = f"=S{target_row}-T{target_row}-W{target_row}"
 
                 pagu_val = get_row_pagu(ws, target_row)
                 summary_preview.append({
@@ -372,11 +382,13 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                     "Pagu": pagu_val,
                     "Realisasi": sum(row_bulanan_val.values()) + nilai_outstanding,
                     "Outstanding": nilai_outstanding,
+                    "Blokir": 0,
                     **row_bulanan_val
                 })
 
                 data_ref = ws.cell(row=target_row, column=19)
-                for c_idx in range(20, 36):
+                # Range format styling diperpanjang hingga kolom 37 (mencakup KETERANGAN)
+                for c_idx in range(20, 37):
                     c = ws.cell(row=target_row, column=c_idx)
                     if data_ref.has_style:
                         c.font, c.border, c.alignment, c.number_format = copy(data_ref.font), copy(data_ref.border), copy(data_ref.alignment), copy(data_ref.number_format)

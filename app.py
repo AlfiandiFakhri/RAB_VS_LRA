@@ -248,7 +248,6 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
             
         kamar_rab_saat_ini = f"{rab_komp}_{rab_sub}_{rab_akun}"
         
-        # PENCEGAHAN DOUBLE COUNTING: HANYA MATCH BARIS ITEM / AKUN (ABAIKAN HEADER KOMPONEN & SUB KOMPONEN)
         is_header_row = (len(kode_col) == 3 or re.match(r'^[A-Z]\.?\s*$', sub_col) or kode_col in ['044.01.EB', '7475', '7475.QDG', '7475.QDG.001'])
         
         bagian_teks = []
@@ -293,8 +292,12 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                     ws.cell(row=target_row, column=25 + idx_b).value = val_b 
                     total_realisasi_baris += val_b
                 
-                ws.cell(row=target_row, column=22).value = f"=SUM(Y{target_row}:AJ{target_row})+X{target_row}"
-                ws.cell(row=target_row, column=23).value = f"=U{target_row}-V{target_row}"
+                # LANGSUNG TULIS ANGKA NOMINAL (BUKAN FORMULA TEKS) AGAR TERBACA LANGSUNG
+                pagu_setelah_blokir_row = safe_float(ws_data.cell(row=target_row, column=21).value)
+                sisa_row = pagu_setelah_blokir_row - total_realisasi_baris
+
+                ws.cell(row=target_row, column=22).value = total_realisasi_baris # V: Total Realisasi
+                ws.cell(row=target_row, column=23).value = sisa_row # W: Sisa
 
                 data_ditemukan += 1
                 
@@ -541,7 +544,7 @@ if file_rab and file_lra_list:
                 list_bulan_tuple = tuple(list_semua_bulan)
                 data_realisasi, monthly_totals = parse_lra_files_cached(lra_files_tuple, list_bulan_tuple)
                 
-                st.write("Menyelaraskan dengan RAB & Mencegah Double Counting Realisasi...")
+                st.write("Menyelaraskan dengan RAB & Menulis Nominal Total Realisasi...")
                 rab_bytes = file_rab.getvalue()
                 output_excel_bytes, data_ditemukan, satker_summary, component_metrics, sub_component_realisasi, sub_component_sisa = process_rab_lra_cached(rab_bytes, data_realisasi, list_bulan_tuple)
                 
@@ -550,7 +553,7 @@ if file_rab and file_lra_list:
                 
                 status.update(label="Proses Selesai!", state="complete", expanded=False)
 
-            st.success(f"🎉 SUKSES! Realisasi terhitung akurat tanpa duplikasi.")
+            st.success(f"🎉 SUKSES! Total Realisasi kini langsung terisi dengan nominal yang akurat.")
             st.divider()
 
             st.subheader("📈 Executive Summary")

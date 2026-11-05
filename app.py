@@ -257,15 +257,21 @@ def parse_lra_files_cached(lra_files_input, list_semua_bulan):
     return data_realisasi, satker_summary, monthly_totals, component_summary, component_metrics, sub_component_realisasi, sub_component_sisa
 
 @st.cache_data
-def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
+def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan, rab_blokir_bytes=None):
+    # Memuat RAB Utama
     file_rab_io = io.BytesIO(rab_bytes)
     wb = load_workbook(file_rab_io)
     ws = wb.active 
     
+    # Memuat RAB Versi Blokir (Jika ada)
+    ws_blokir = None
+    if rab_blokir_bytes:
+        wb_blokir = load_workbook(io.BytesIO(rab_blokir_bytes), data_only=True)
+        ws_blokir = wb_blokir.active
+
     baris_header = 13 
     baris_mulai_data = 14
     
-    # Penambahan kolom BLOKIR ANGGARAN
     kolom_baru = ["TOTAL Realisasi", "SISA", "OUT STANDING", "BLOKIR ANGGARAN", "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER", "KETERANGAN"]
     header_ref = ws.cell(row=baris_header, column=19)
     start_col = 20
@@ -273,7 +279,7 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
     warna_hijau = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
     warna_kuning = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
     warna_orange = PatternFill(start_color="FCD5B4", end_color="FCD5B4", fill_type="solid") 
-    warna_merah_muda = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid") # Warna untuk blokir
+    warna_merah_muda = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
     
     for i, nama_kolom in enumerate(kolom_baru):
         cell = ws.cell(row=baris_header, column=start_col + i)
@@ -291,12 +297,12 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
             if header_ref.has_style: cell.fill = copy(header_ref.fill)
 
     # Penyesuaian Lebar Kolom
-    ws.column_dimensions[get_column_letter(20)].width = 20.5 # Total Realisasi
-    ws.column_dimensions[get_column_letter(21)].width = 18.2 # Sisa
-    ws.column_dimensions[get_column_letter(22)].width = 18.2 # Outstanding
-    ws.column_dimensions[get_column_letter(23)].width = 18.2 # Blokir Anggaran
-    for c_idx in range(24, 36): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 # Bulan-bulan
-    ws.column_dimensions[get_column_letter(36)].width = 35.0 # Keterangan
+    ws.column_dimensions[get_column_letter(20)].width = 20.5 
+    ws.column_dimensions[get_column_letter(21)].width = 18.2 
+    ws.column_dimensions[get_column_letter(22)].width = 18.2 
+    ws.column_dimensions[get_column_letter(23)].width = 18.2 
+    for c_idx in range(24, 36): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 
+    ws.column_dimensions[get_column_letter(36)].width = 35.0 
 
     max_row = ws.max_row
     data_ditemukan = 0
@@ -361,16 +367,28 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                         break
                 baris_terpakai.add(target_row)
                 
+                # Masukkan nilai Outstanding ke Kolom 22 (V)
                 ws.cell(row=target_row, column=22).value = nilai_outstanding
-                ws.cell(row=target_row, column=23).value = 0 # Inisialisasi awal Blokir = 0
+                
+                # ==========================================
+                # BACA ANGKA BLOKIR DARI KOLOM 20 (T) FILE KEDUA
+                # ==========================================
+                nilai_blokir = 0
+                if ws_blokir:
+                    val_blokir_raw = ws_blokir.cell(row=row_idx, column=20).value
+                    nilai_blokir = safe_float(val_blokir_raw)
+                
+                # Tulis angka blokir ke Kolom 23 (W) di file hasil laporan
+                ws.cell(row=target_row, column=23).value = nilai_blokir
+                # ==========================================
                 
                 row_bulanan_val = {}
                 for idx_b, b_name in enumerate(list_semua_bulan):
                     val_b = dict_bulanan[b_name]
-                    ws.cell(row=target_row, column=24 + idx_b).value = val_b # Indeks bulan tergeser jadi mulai di kolom 24
+                    ws.cell(row=target_row, column=24 + idx_b).value = val_b
                     row_bulanan_val[b_name] = val_b
                 
-                # Rumus Total Realisasi menjumlahkan kolom X (Jan) hingga AI (Des) + V (Outstanding)
+                # Rumus Total Realisasi menjumlahkan kolom X (24) hingga AI (35) + V (22)
                 ws.cell(row=target_row, column=20).value = f"=SUM(X{target_row}:AI{target_row})+V{target_row}"
                 # Rumus Sisa mengurangi Pagu (S) dengan Total Realisasi (T) dan Blokir Anggaran (W)
                 ws.cell(row=target_row, column=21).value = f"=S{target_row}-T{target_row}-W{target_row}"
@@ -382,7 +400,7 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                     "Pagu": pagu_val,
                     "Realisasi": sum(row_bulanan_val.values()) + nilai_outstanding,
                     "Outstanding": nilai_outstanding,
-                    "Blokir": 0,
+                    "Blokir": nilai_blokir,
                     **row_bulanan_val
                 })
 
@@ -408,7 +426,6 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
     prs.slide_height = Inches(7.5)
     blank_layout = prs.slide_layouts[6]
     
-    # --- WARNA TEMA DEEP TEAL ---
     DEEP_TEAL = RGBColor(0, 64, 64)       
     GOLD_ACCENT = RGBColor(218, 165, 32)  
     GREY_TEXT = RGBColor(80, 90, 100)     
@@ -429,9 +446,7 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
         line.fill.fore_color.rgb = GOLD_ACCENT
         line.line.fill.background()
     
-    # ---------------------------------------------------------
     # 1. SLIDE COVER (JUDUL)
-    # ---------------------------------------------------------
     slide1 = prs.slides.add_slide(blank_layout)
     bg = slide1.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0), Inches(0), Inches(13.333), Inches(7.5))
     bg.fill.solid(); bg.fill.fore_color.rgb = DEEP_TEAL; bg.line.fill.background()
@@ -450,9 +465,7 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
     p2.text = "Konsolidasi Anggaran (RAB vs LRA)"
     p2.font.size, p2.font.name, p2.font.color.rgb = Pt(24), "Arial", RGBColor(180, 205, 205)
     
-    # ---------------------------------------------------------
     # 2. SLIDE RINGKASAN EKSEKUTIF 
-    # ---------------------------------------------------------
     slide2 = prs.slides.add_slide(blank_layout)
     add_slide_header(slide2, "Ringkasan Kinerja Anggaran")
     
@@ -504,9 +517,7 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
                 p = cell.text_frame.paragraphs[0]
                 p.font.color.rgb, p.font.size = GREY_TEXT, Pt(11)
 
-    # ---------------------------------------------------------
     # 3. SLIDE GRAFIK TREN BULANAN
-    # ---------------------------------------------------------
     slide3 = prs.slides.add_slide(blank_layout)
     add_slide_header(slide3, "Tren Penyerapan Anggaran Bulanan")
     
@@ -532,13 +543,10 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
     img_buf = io.BytesIO(); fig_m.savefig(img_buf, format='png', dpi=300, bbox_inches='tight', transparent=True); plt.close(fig_m); img_buf.seek(0)
     slide3.shapes.add_picture(img_buf, Inches(0.5), Inches(1.5), width=Inches(12.0))
     
-    # ---------------------------------------------------------
     # 4. SLIDE RINCIAN SUB KOMPONEN (REALISASI & SISA)
-    # ---------------------------------------------------------
     semua_komponen_unik = sorted(list(set(list(sub_component_realisasi.keys()) + list(sub_component_sisa.keys()))))
     
     for komp_name in semua_komponen_unik:
-        
         # ---- SLIDE: REALISASI SUB KOMPONEN ----
         if komp_name in sub_component_realisasi:
             sub_dict_real_table = {k: float(v) for k, v in sub_component_realisasi[komp_name].items() if pd.notna(v) and float(v) >= 0}
@@ -670,7 +678,12 @@ st.divider()
 col1, col2 = st.columns(2)
 with col1:
     st.info("File RAB")
-    file_rab = st.file_uploader("Upload Excel RAB", type=['xlsx', 'xls'], key="rab")
+    file_rab = st.file_uploader("Upload Excel RAB Utama", type=['xlsx', 'xls'], key="rab")
+    
+    # TAMBAHAN FITUR: Uploader RAB khusus Blokir
+    st.info("File RAB Versi Blokir (Opsional)")
+    file_rab_blokir = st.file_uploader("Upload Excel RAB Blokir (Angka Blokir di Kolom T)", type=['xlsx', 'xls'], key="rab_blokir")
+
 with col2:
     st.info("File LRA")
     file_lra_list = st.file_uploader("Upload Excel LRA (Bisa pilih banyak file)", type=['xlsx', 'xls'], accept_multiple_files=True, key="lra")
@@ -691,7 +704,12 @@ if file_rab and file_lra_list:
                 
                 st.write("Menyelaraskan ...")
                 rab_bytes = file_rab.getvalue()
-                output_excel_bytes, data_ditemukan, df_preview = process_rab_lra_cached(rab_bytes, data_realisasi, list_bulan_tuple)
+                
+                # Cek apakah user mengupload file RAB versi blokir
+                rab_blokir_bytes = file_rab_blokir.getvalue() if file_rab_blokir else None
+                
+                # Masukkan rab_blokir_bytes ke dalam parameter fungsi
+                output_excel_bytes, data_ditemukan, df_preview = process_rab_lra_cached(rab_bytes, data_realisasi, list_bulan_tuple, rab_blokir_bytes)
                 
                 st.write("Menyiapkan dokumen presentasi PowerPoint (.pptx)...")
                 ppt_output_bytes = create_powerpoint_report(satker_summary, component_metrics, monthly_totals, sub_component_realisasi, sub_component_sisa)

@@ -258,29 +258,26 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
     
     baris_header = 13 
     baris_mulai_data = 14
+    max_row = ws.max_row
     
     # -----------------------------------------------------
-    # MENCARI KOLOM 'BLOKIR' DARI FILE RAB SUMBER (DINAMIS)
+    # EKSTRAK TOTAL BLOKIR SATKER DARI KOLOM T (20)
+    # Mencari nilai Blokir tertinggi sebagai total keseluruhan Satker
     # -----------------------------------------------------
-    sumber_blokir_col_idx = None
-    for r_cek in range(10, 16):  # Mencari di rentang baris 10 hingga 15 (antisipasi header bergeser)
-        for c_cek in range(1, 30): 
-            val_head = ws.cell(row=r_cek, column=c_cek).value
-            if val_head and isinstance(val_head, str) and val_head.strip().lower() == "blokir":
-                sumber_blokir_col_idx = c_cek
-                break
-        if sumber_blokir_col_idx:
-            break
-
-    # PENAMBAHAN KOLOM BLOKIR PADA OUTPUT
-    kolom_baru = ["TOTAL Realisasi", "BLOKIR", "SISA", "OUT STANDING", "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER", "KETERANGAN"]
-    header_ref = ws.cell(row=baris_header, column=19)
-    start_col = 20
+    total_blokir_satker = 0
+    for r_cek in range(baris_mulai_data, max_row + 1):
+        v = safe_float(ws.cell(row=r_cek, column=20).value)
+        if v > total_blokir_satker:
+            total_blokir_satker = v
+    
+    # MULAI INJECT KOLOM DARI V (22) KARENA S, T, U SUDAH TERISI DI TEMPLATE RAB_V11
+    kolom_baru = ["TOTAL Realisasi", "SISA", "OUT STANDING", "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER", "KETERANGAN"]
+    header_ref = ws.cell(row=baris_header, column=21) 
+    start_col = 22
     
     warna_hijau = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
     warna_kuning = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
     warna_orange = PatternFill(start_color="FCD5B4", end_color="FCD5B4", fill_type="solid") 
-    warna_merah_muda = PatternFill(start_color="FF9999", end_color="FF9999", fill_type="solid") 
     
     for i, nama_kolom in enumerate(kolom_baru):
         cell = ws.cell(row=baris_header, column=start_col + i)
@@ -290,22 +287,19 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
             cell.border = copy(header_ref.border)
             cell.alignment = copy(header_ref.alignment)
         if nama_kolom == "TOTAL Realisasi": cell.fill = warna_hijau
-        elif nama_kolom == "BLOKIR": cell.fill = warna_merah_muda
         elif nama_kolom == "SISA": cell.fill = warna_kuning
         elif nama_kolom == "OUT STANDING": cell.fill = warna_orange
         else:
             if header_ref.has_style: cell.fill = copy(header_ref.fill)
 
-    ws.column_dimensions[get_column_letter(20)].width = 20.5 # T (Total Realisasi)
-    ws.column_dimensions[get_column_letter(21)].width = 18.0 # U (Blokir)
-    ws.column_dimensions[get_column_letter(22)].width = 18.2 # V (Sisa)
-    ws.column_dimensions[get_column_letter(23)].width = 18.2 # W (Outstanding)
-    for c_idx in range(24, 36): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 # X s.d AI
-    ws.column_dimensions[get_column_letter(36)].width = 35.0 # AJ
+    # Menyesuaikan lebar kolom untuk V dan seterusnya
+    ws.column_dimensions[get_column_letter(22)].width = 20.5 # V
+    ws.column_dimensions[get_column_letter(23)].width = 18.2 # W
+    ws.column_dimensions[get_column_letter(24)].width = 18.2 # X
+    for c_idx in range(25, 37): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 # Y s/d AJ
+    ws.column_dimensions[get_column_letter(37)].width = 35.0 # AK
 
-    max_row = ws.max_row
     data_ditemukan = 0
-    total_blokir_satker = 0
     rab_komp, rab_sub, rab_akun = "GLOBAL", "GLOBAL", "GLOBAL"
     baris_terpakai = set()
     summary_preview = []
@@ -357,32 +351,26 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                 
                 target_row = row_idx
                 for r_cek in range(row_idx, min(row_idx + 6, max_row + 1)):
-                    val_s = ws.cell(row=r_cek, column=19).value
+                    val_s = ws.cell(row=r_cek, column=19).value # patokan Jumlah
                     if val_s is not None and r_cek not in baris_terpakai:
                         target_row = r_cek
                         break
                 baris_terpakai.add(target_row)
                 
-                # EKSTRAK DATA BLOKIR DARI SUMBER RAB
-                nilai_blokir = 0
-                if sumber_blokir_col_idx is not None:
-                    # Mengambil dari baris sejajar (target_row) atau baris asalnya (row_idx)
-                    val_t = safe_float(ws.cell(row=target_row, column=sumber_blokir_col_idx).value)
-                    val_r = safe_float(ws.cell(row=row_idx, column=sumber_blokir_col_idx).value)
-                    nilai_blokir = val_t if val_t != 0 else val_r
+                # Membaca nilai blokir dari Kolom T (20) asli template RAB
+                nilai_blokir = safe_float(ws.cell(row=target_row, column=20).value)
                 
-                total_blokir_satker += nilai_blokir
-                
-                ws.cell(row=target_row, column=23).value = nilai_outstanding # W
+                ws.cell(row=target_row, column=24).value = nilai_outstanding # X: Outstanding
                 row_bulanan_val = {}
                 for idx_b, b_name in enumerate(list_semua_bulan):
                     val_b = dict_bulanan[b_name]
-                    ws.cell(row=target_row, column=24 + idx_b).value = val_b # X s.d AI
+                    ws.cell(row=target_row, column=25 + idx_b).value = val_b # Y sd AJ
                     row_bulanan_val[b_name] = val_b
                 
-                ws.cell(row=target_row, column=21).value = nilai_blokir # U
-                ws.cell(row=target_row, column=20).value = f"=SUM(X{target_row}:AI{target_row})+W{target_row}" # T
-                ws.cell(row=target_row, column=22).value = f"=S{target_row}-T{target_row}-U{target_row}" # V (Pagu - Realisasi - Blokir)
+                # V = TOTAL Realisasi
+                ws.cell(row=target_row, column=22).value = f"=SUM(Y{target_row}:AJ{target_row})+X{target_row}" 
+                # W = SISA ( Pagu Setelah Blokir (U) - Total Realisasi (V) )
+                ws.cell(row=target_row, column=23).value = f"=U{target_row}-V{target_row}"
 
                 pagu_val = get_row_pagu(ws, target_row)
                 summary_preview.append({
@@ -395,8 +383,8 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                     **row_bulanan_val
                 })
 
-                data_ref = ws.cell(row=target_row, column=19)
-                for c_idx in range(20, 37):
+                data_ref = ws.cell(row=target_row, column=21)
+                for c_idx in range(22, 38):
                     c = ws.cell(row=target_row, column=c_idx)
                     if data_ref.has_style:
                         c.font, c.border, c.alignment, c.number_format = copy(data_ref.font), copy(data_ref.border), copy(data_ref.alignment), copy(data_ref.number_format)
@@ -664,7 +652,7 @@ if file_rab and file_lra_list:
                 
                 data_realisasi, satker_summary, monthly_totals, component_summary, component_metrics, sub_component_realisasi, sub_component_sisa = parse_lra_files_cached(lra_files_tuple, list_bulan_tuple)
                 
-                st.write("Menyelaraskan dengan RAB & Mengekstrak Kolom Blokir...")
+                st.write("Menyelaraskan dengan RAB & Mengekstrak Kolom Blokir (T)...")
                 rab_bytes = file_rab.getvalue()
                 output_excel_bytes, data_ditemukan, df_preview, total_blokir_satker = process_rab_lra_cached(rab_bytes, data_realisasi, list_bulan_tuple)
                 

@@ -157,7 +157,6 @@ def parse_lra_files_cached(lra_files_input, list_semua_bulan):
 def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
     file_rab_io = io.BytesIO(rab_bytes)
     
-    # Ambil nilai evaluasi formula untuk Pagu (Kolom S), Blokir (Kolom T), Pagu setelah Blokir (Kolom U)
     wb_data = load_workbook(file_rab_io, data_only=True)
     ws_data = wb_data.active
     
@@ -170,14 +169,13 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
     baris_mulai_data = 14
     max_row = ws.max_row
     
-    # Kolom baru dimulai dari V (index 22)
     kolom_baru = ["TOTAL Realisasi", "SISA", "OUT STANDING", "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER"]
     
     warna_hijau = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
     warna_kuning = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
     warna_orange = PatternFill(start_color="FCD5B4", end_color="FCD5B4", fill_type="solid") 
     
-    header_ref = ws.cell(row=baris_header, column=21) # Referensi dari kolom U (Pagu setelah Blokir)
+    header_ref = ws.cell(row=baris_header, column=21) 
     
     start_col = 22
     for i, nama_kolom in enumerate(kolom_baru):
@@ -191,12 +189,11 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
         else:
             if header_ref.has_style: cell.fill = copy(header_ref.fill)
 
-    # Lebar Kolom
-    ws.column_dimensions[get_column_letter(22)].width = 20.5 # V: Total Realisasi
-    ws.column_dimensions[get_column_letter(23)].width = 18.2 # W: Sisa
-    ws.column_dimensions[get_column_letter(24)].width = 18.2 # X: Outstanding
-    for c_idx in range(25, 37): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 # Y s/d AJ
-    ws.column_dimensions[get_column_letter(37)].width = 35.0 # AK: Keterangan
+    ws.column_dimensions[get_column_letter(22)].width = 20.5 
+    ws.column_dimensions[get_column_letter(23)].width = 18.2 
+    ws.column_dimensions[get_column_letter(24)].width = 18.2 
+    for c_idx in range(25, 37): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 
+    ws.column_dimensions[get_column_letter(37)].width = 35.0 
 
     data_ditemukan = 0
     rab_komp, rab_sub, rab_akun = "GLOBAL", "GLOBAL", "GLOBAL"
@@ -210,7 +207,6 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
     sub_component_realisasi = {}
     sub_component_sisa = {} 
     
-    # Ambil Total Satker dari Baris 14 (Col S = Pagu, Col T = Blokir)
     satker_pagu = safe_float(ws_data.cell(row=14, column=19).value)
     satker_blokir = safe_float(ws_data.cell(row=14, column=20).value)
     
@@ -221,7 +217,6 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
         kode_col = str(ws.cell(row=row_idx, column=2).value).strip()
         sub_col = str(ws.cell(row=row_idx, column=4).value).strip()
         
-        # Ambil Pagu & Blokir dari ws_data
         row_pagu = safe_float(ws_data.cell(row=row_idx, column=19).value)
         row_blokir = safe_float(ws_data.cell(row=row_idx, column=20).value)
         pagu_efektif_row = row_pagu - row_blokir
@@ -252,10 +247,16 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
             rab_akun = kode_col
             
         kamar_rab_saat_ini = f"{rab_komp}_{rab_sub}_{rab_akun}"
+        
+        # PENCEGAHAN DOUBLE COUNTING: HANYA MATCH BARIS ITEM / AKUN (ABAIKAN HEADER KOMPONEN & SUB KOMPONEN)
+        is_header_row = (len(kode_col) == 3 or re.match(r'^[A-Z]\.?\s*$', sub_col) or kode_col in ['044.01.EB', '7475', '7475.QDG', '7475.QDG.001'])
+        
         bagian_teks = []
-        for col_idx in range(3, 7):
-            val = ws.cell(row=row_idx, column=col_idx).value
-            if val and isinstance(val, str) and str(val).strip() not in ['-', '']: bagian_teks.append(str(val).strip())
+        if not is_header_row:
+            for col_idx in range(3, 7):
+                val = ws.cell(row=row_idx, column=col_idx).value
+                if val and isinstance(val, str) and str(val).strip() not in ['-', '']: 
+                    bagian_teks.append(str(val).strip())
         
         if bagian_teks:
             uraian_rab = " ".join(bagian_teks)
@@ -285,15 +286,15 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                         break
                 baris_terpakai.add(target_row)
                 
-                ws.cell(row=target_row, column=24).value = nilai_outstanding # X: Outstanding
+                ws.cell(row=target_row, column=24).value = nilai_outstanding 
                 total_realisasi_baris = nilai_outstanding
                 for idx_b, b_name in enumerate(list_semua_bulan):
                     val_b = dict_bulanan[b_name]
-                    ws.cell(row=target_row, column=25 + idx_b).value = val_b # Y sd AJ
+                    ws.cell(row=target_row, column=25 + idx_b).value = val_b 
                     total_realisasi_baris += val_b
                 
-                ws.cell(row=target_row, column=22).value = f"=SUM(Y{target_row}:AJ{target_row})+X{target_row}" # V: Total Realisasi
-                ws.cell(row=target_row, column=23).value = f"=U{target_row}-V{target_row}" # W: Sisa (Pagu Setelah Blokir - Total Realisasi)
+                ws.cell(row=target_row, column=22).value = f"=SUM(Y{target_row}:AJ{target_row})+X{target_row}"
+                ws.cell(row=target_row, column=23).value = f"=U{target_row}-V{target_row}"
 
                 data_ditemukan += 1
                 
@@ -540,7 +541,7 @@ if file_rab and file_lra_list:
                 list_bulan_tuple = tuple(list_semua_bulan)
                 data_realisasi, monthly_totals = parse_lra_files_cached(lra_files_tuple, list_bulan_tuple)
                 
-                st.write("Menyelaraskan dengan RAB & Membaca Kolom Pagu / Blokir Asli...")
+                st.write("Menyelaraskan dengan RAB & Mencegah Double Counting Realisasi...")
                 rab_bytes = file_rab.getvalue()
                 output_excel_bytes, data_ditemukan, satker_summary, component_metrics, sub_component_realisasi, sub_component_sisa = process_rab_lra_cached(rab_bytes, data_realisasi, list_bulan_tuple)
                 
@@ -549,7 +550,7 @@ if file_rab and file_lra_list:
                 
                 status.update(label="Proses Selesai!", state="complete", expanded=False)
 
-            st.success(f"🎉 SUKSES! Kolom RAB asli terjaga dan data sinkron dengan LRA.")
+            st.success(f"🎉 SUKSES! Realisasi terhitung akurat tanpa duplikasi.")
             st.divider()
 
             st.subheader("📈 Executive Summary")

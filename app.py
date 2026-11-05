@@ -74,51 +74,10 @@ def get_similarity_score(t1, t2):
         
     return sim
 
-def get_row_pagu(ws, row_idx):
-    try:
-        f_val = ws.cell(row=row_idx, column=6).value
-        h_val = ws.cell(row=row_idx, column=8).value
-        r_val = ws.cell(row=row_idx, column=18).value
-        
-        def parse_val(v):
-            if isinstance(v, (int, float)): return float(v)
-            if isinstance(v, str) and v.startswith('='):
-                parts = v.lstrip('=').split('*')
-                nums = []
-                for p in parts:
-                    p = p.strip()
-                    try:
-                        nums.append(float(p))
-                    except:
-                        col_letter = ''.join([c for c in p if c.isalpha()])
-                        row_num = int(''.join([c for c in p if c.isdigit()]))
-                        col_idx = ord(col_letter.upper()) - 64
-                        cell_v = ws.cell(row=row_num, column=col_idx).value
-                        if isinstance(cell_v, (int, float)): nums.append(float(cell_v))
-                        else: nums.append(1.0)
-                res = 1.0
-                for n in nums: res *= n
-                return res
-            return 0.0
-            
-        vol1 = parse_val(f_val) if f_val is not None else 1.0
-        vol2 = parse_val(h_val) if h_val is not None else 1.0
-        biaya = parse_val(r_val) if r_val is not None else 0.0
-        
-        h_raw = ws.cell(row=row_idx, column=7).value
-        if h_raw is not None and isinstance(h_raw, str) and 'x' in h_raw.lower():
-            return vol1 * vol2 * biaya
-        else:
-            return vol1 * biaya
-    except:
-        return 0.0
-
 @st.cache_data
 def parse_lra_files_cached(lra_files_input, list_semua_bulan):
     data_realisasi = {}
-    satker_summary = {"pagu": 0, "realisasi": 0, "sisa": 0, "outstanding": 0}
     monthly_totals = {b: 0 for b in list_semua_bulan}
-    component_summary = {}
     component_metrics = {}
     sub_component_realisasi = {}
     sub_component_sisa = {} 
@@ -165,50 +124,6 @@ def parse_lra_files_cached(lra_files_input, list_semua_bulan):
         if ada_gup_spm and not bulan_file:
             is_outstanding_file = True
 
-        if 'Level' in df_lra.columns:
-            current_komp = ""
-            for _, row_lra in df_lra.iterrows():
-                lvl = str(row_lra.get('Level')).strip()
-                uraian = str(row_lra.get('Kode / Uraian', '')).strip()
-                
-                pagu = safe_float(row_lra.get('Pagu'))
-                realisasi_sub = safe_float(row_lra.get('Total Realisasi'))
-                sisa_sub = safe_float(row_lra.get('Sisa'))
-                
-                if lvl == 'Komponen':
-                    current_komp = uraian
-                    component_summary[current_komp] = pagu
-                    if is_outstanding_file or current_komp not in component_metrics or realisasi_sub > component_metrics[current_komp]['realisasi']:
-                        component_metrics[current_komp] = {
-                            "pagu": pagu,
-                            "realisasi": realisasi_sub,
-                            "sisa": sisa_sub,
-                            "persen": (realisasi_sub / pagu * 100) if pagu > 0 else 0
-                        }
-                elif lvl == 'Sub Komponen':
-                    if current_komp:
-                        if current_komp not in sub_component_realisasi: sub_component_realisasi[current_komp] = {}
-                        if current_komp not in sub_component_sisa: sub_component_sisa[current_komp] = {}
-                            
-                        current_stored_real = sub_component_realisasi[current_komp].get(uraian, -1)
-                        if is_outstanding_file or uraian not in sub_component_realisasi[current_komp] or realisasi_sub > current_stored_real:
-                            sub_component_realisasi[current_komp][uraian] = realisasi_sub
-                            sub_component_sisa[current_komp][uraian] = sisa_sub
-
-        if is_outstanding_file:
-            satker_row = df_lra[df_lra['Level'].astype(str).str.strip() == 'Satker']
-            if not satker_row.empty:
-                satker_summary["pagu"] = safe_float(satker_row['Pagu'].values[0])
-                satker_summary["realisasi"] = safe_float(satker_row['Total Realisasi'].values[0])
-                satker_summary["sisa"] = safe_float(satker_row['Sisa'].values[0])
-            
-            detail_rows = df_lra[df_lra['Level'].astype(str).str.strip() == 'Detail']
-            satker_summary["outstanding"] = (
-                pd.to_numeric(detail_rows['GUP'], errors='coerce').fillna(0).sum() +
-                pd.to_numeric(detail_rows['SPM'], errors='coerce').fillna(0).sum() +
-                pd.to_numeric(detail_rows['Verifikasi'], errors='coerce').fillna(0).sum()
-            )
-
         if not bulan_file and not is_outstanding_file: continue
             
         cur_komp, cur_sub, cur_akun = "GLOBAL", "GLOBAL", "GLOBAL"
@@ -248,7 +163,7 @@ def parse_lra_files_cached(lra_files_input, list_semua_bulan):
                 if is_outstanding_file:
                     data_realisasi[kamar_unik][norm_lra]['OUTSTANDING'] += outstanding_val
                 
-    return data_realisasi, satker_summary, monthly_totals, component_summary, component_metrics, sub_component_realisasi, sub_component_sisa
+    return data_realisasi, monthly_totals
 
 @st.cache_data
 def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
@@ -261,67 +176,100 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
     # -----------------------------------------------------
     ws.title = "DATA"
     
+    # Header yang diharapkan ada di baris 13 (termasuk S: Jumlah, T: Blokir, U: Pagu setelah Blokir)
     baris_header = 13 
     baris_mulai_data = 14
     max_row = ws.max_row
     
-    # -----------------------------------------------------
-    # EKSTRAK TOTAL BLOKIR SATKER DARI KOLOM T (20)
-    # -----------------------------------------------------
-    total_blokir_satker = 0
-    for r_cek in range(baris_mulai_data, max_row + 1):
-        v = safe_float(ws.cell(row=r_cek, column=20).value)
-        if v > total_blokir_satker:
-            total_blokir_satker = v
-    
-    # MULAI INJECT KOLOM DARI V (22) 
+    # Kolom V (22) dan seterusnya
     kolom_baru = ["TOTAL Realisasi", "SISA", "OUT STANDING", "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER", "KETERANGAN"]
-    header_ref = ws.cell(row=baris_header, column=21) 
-    start_col = 22
     
     warna_hijau = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
     warna_kuning = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
     warna_orange = PatternFill(start_color="FCD5B4", end_color="FCD5B4", fill_type="solid") 
+    header_ref = ws.cell(row=baris_header, column=21) # Referensi format dari kolom U (Pagu setelah blokir)
     
+    start_col = 22
     for i, nama_kolom in enumerate(kolom_baru):
         cell = ws.cell(row=baris_header, column=start_col + i)
         cell.value = nama_kolom
         if header_ref.has_style:
-            cell.font = copy(header_ref.font)
-            cell.border = copy(header_ref.border)
-            cell.alignment = copy(header_ref.alignment)
+            cell.font, cell.border, cell.alignment = copy(header_ref.font), copy(header_ref.border), copy(header_ref.alignment)
         if nama_kolom == "TOTAL Realisasi": cell.fill = warna_hijau
         elif nama_kolom == "SISA": cell.fill = warna_kuning
         elif nama_kolom == "OUT STANDING": cell.fill = warna_orange
         else:
             if header_ref.has_style: cell.fill = copy(header_ref.fill)
 
-    # Menyesuaikan lebar kolom untuk V dan seterusnya
-    ws.column_dimensions[get_column_letter(22)].width = 20.5 # V
-    ws.column_dimensions[get_column_letter(23)].width = 18.2 # W
-    ws.column_dimensions[get_column_letter(24)].width = 18.2 # X
+    # Lebar kolom
+    ws.column_dimensions[get_column_letter(22)].width = 20.5 # V: Total Realisasi
+    ws.column_dimensions[get_column_letter(23)].width = 18.2 # W: Sisa
+    ws.column_dimensions[get_column_letter(24)].width = 18.2 # X: Outstanding
     for c_idx in range(25, 37): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 # Y s/d AJ
-    ws.column_dimensions[get_column_letter(37)].width = 35.0 # AK
+    ws.column_dimensions[get_column_letter(37)].width = 35.0 # AK: Keterangan
 
     data_ditemukan = 0
     rab_komp, rab_sub, rab_akun = "GLOBAL", "GLOBAL", "GLOBAL"
     baris_terpakai = set()
-    summary_preview = []
     
     import copy as cp
     data_realisasi = cp.deepcopy(data_realisasi_tuple)
+    
+    # -----------------------------------------------------
+    # STRUKTUR PENYIMPANAN DATA UNTUK PPT & DASHBOARD
+    # -----------------------------------------------------
+    satker_summary = {"pagu": 0, "blokir": 0, "realisasi": 0, "sisa": 0, "outstanding": 0}
+    component_metrics = {}
+    sub_component_realisasi = {}
+    sub_component_sisa = {} 
+    
+    # Ambil nilai total Satker (Diasumsikan ada di baris 14, di mana level Satker berada)
+    # Anda perlu menyesuaikan ini jika letak grand total RAB tidak selalu di baris 14
+    satker_pagu = safe_float(ws.cell(row=14, column=19).value)
+    satker_blokir = safe_float(ws.cell(row=14, column=20).value)
+    
+    # Variabel pelacakan level
+    current_komponen_name = ""
+    current_komponen_kode = ""
+    current_subkomponen_name = ""
 
     for row_idx in range(baris_mulai_data, max_row + 1):
         kode_col = str(ws.cell(row=row_idx, column=2).value).strip()
+        sub_col = str(ws.cell(row=row_idx, column=4).value).strip()
+        
+        # Ekstrak data Pagu & Blokir per baris (dari file RAB)
+        row_pagu = safe_float(ws.cell(row=row_idx, column=19).value)
+        row_blokir = safe_float(ws.cell(row=row_idx, column=20).value)
+        
+        # Deteksi Komponen (Level: 3 digit angka)
         if kode_col.isdigit() and len(kode_col) == 3: 
             rab_komp = kode_col
             rab_sub, rab_akun = "GLOBAL", "GLOBAL"
-        elif kode_col.isdigit() and len(kode_col) == 6: rab_akun = kode_col
+            current_komponen_kode = kode_col
+            
+            uraian_komp = " ".join([str(ws.cell(row=row_idx, column=c).value).strip() for c in range(3, 7) if ws.cell(row=row_idx, column=c).value and str(ws.cell(row=row_idx, column=c).value).strip() not in ['-', '']])
+            current_komponen_name = f"{kode_col} - {uraian_komp}"
+            
+            if current_komponen_name not in component_metrics:
+                component_metrics[current_komponen_name] = {"pagu": row_pagu, "blokir": row_blokir, "realisasi": 0, "sisa": 0, "persen": 0}
 
-        sub_col = str(ws.cell(row=row_idx, column=4).value).strip()
-        if re.match(r'^[A-Z]\.?\s*$', sub_col):
+        # Deteksi Sub Komponen (Level: 1 huruf besar)
+        elif re.match(r'^[A-Z]\.?\s*$', sub_col):
             rab_sub = sub_col.replace('.', '').strip()
             rab_akun = "GLOBAL" 
+            
+            uraian_sub = " ".join([str(ws.cell(row=row_idx, column=c).value).strip() for c in range(5, 7) if ws.cell(row=row_idx, column=c).value and str(ws.cell(row=row_idx, column=c).value).strip() not in ['-', '']])
+            current_subkomponen_name = f"{rab_sub} - {uraian_sub}"
+            
+            if current_komponen_name:
+                if current_komponen_name not in sub_component_realisasi:
+                    sub_component_realisasi[current_komponen_name] = {}
+                    sub_component_sisa[current_komponen_name] = {}
+                sub_component_realisasi[current_komponen_name][current_subkomponen_name] = 0
+                sub_component_sisa[current_komponen_name][current_subkomponen_name] = row_pagu - row_blokir # Sisa awal = Pagu - Blokir
+                
+        elif kode_col.isdigit() and len(kode_col) == 6: 
+            rab_akun = kode_col
             
         kamar_rab_saat_ini = f"{rab_komp}_{rab_sub}_{rab_akun}"
         
@@ -330,6 +278,7 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
             val = ws.cell(row=row_idx, column=col_idx).value
             if val and isinstance(val, str) and str(val).strip() not in ['-', '']: bagian_teks.append(str(val).strip())
         
+        # Proses pencocokan LRA
         if bagian_teks:
             uraian_rab = " ".join(bagian_teks)
             best_match = None
@@ -343,11 +292,10 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                         if score > highest_score and score >= 0.80:
                             highest_score = score
                             best_match = (kamar, key)
-                        if highest_score == 1.0:
-                            break
-                if highest_score == 1.0:
-                    break
+                        if highest_score == 1.0: break
+                if highest_score == 1.0: break
             
+            # Jika Cocok, Tulis Realisasi Bulanan ke Excel
             if best_match:
                 kamar_ketemu, key_ketemu = best_match
                 dict_bulanan = data_realisasi[kamar_ketemu].pop(key_ketemu) 
@@ -355,37 +303,21 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                 
                 target_row = row_idx
                 for r_cek in range(row_idx, min(row_idx + 6, max_row + 1)):
-                    val_s = ws.cell(row=r_cek, column=19).value # patokan Jumlah
-                    if val_s is not None and r_cek not in baris_terpakai:
+                    if ws.cell(row=r_cek, column=19).value is not None and r_cek not in baris_terpakai:
                         target_row = r_cek
                         break
                 baris_terpakai.add(target_row)
                 
-                # Membaca nilai blokir dari Kolom T (20) asli template RAB
-                nilai_blokir = safe_float(ws.cell(row=target_row, column=20).value)
-                
                 ws.cell(row=target_row, column=24).value = nilai_outstanding # X: Outstanding
-                row_bulanan_val = {}
+                total_realisasi_baris = nilai_outstanding
                 for idx_b, b_name in enumerate(list_semua_bulan):
                     val_b = dict_bulanan[b_name]
                     ws.cell(row=target_row, column=25 + idx_b).value = val_b # Y sd AJ
-                    row_bulanan_val[b_name] = val_b
+                    total_realisasi_baris += val_b
                 
-                # V = TOTAL Realisasi
-                ws.cell(row=target_row, column=22).value = f"=SUM(Y{target_row}:AJ{target_row})+X{target_row}" 
-                # W = SISA ( Pagu Setelah Blokir (U) - Total Realisasi (V) )
-                ws.cell(row=target_row, column=23).value = f"=U{target_row}-V{target_row}"
-
-                pagu_val = get_row_pagu(ws, target_row)
-                summary_preview.append({
-                    "Komponen": rab_komp,
-                    "Uraian": uraian_rab,
-                    "Pagu": pagu_val,
-                    "Blokir": nilai_blokir,
-                    "Realisasi": sum(row_bulanan_val.values()) + nilai_outstanding,
-                    "Outstanding": nilai_outstanding,
-                    **row_bulanan_val
-                })
+                # Menulis formula Excel untuk rekap per baris
+                ws.cell(row=target_row, column=22).value = f"=SUM(Y{target_row}:AJ{target_row})+X{target_row}" # V: Total Realisasi
+                ws.cell(row=target_row, column=23).value = f"=U{target_row}-V{target_row}" # W: Sisa (Pagu Setelah Blokir - Total Realisasi)
 
                 data_ref = ws.cell(row=target_row, column=21)
                 for c_idx in range(22, 38):
@@ -393,16 +325,41 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                     if data_ref.has_style:
                         c.font, c.border, c.alignment, c.number_format = copy(data_ref.font), copy(data_ref.border), copy(data_ref.alignment), copy(data_ref.number_format)
                 data_ditemukan += 1
+                
+                # --- AKUMULASI UNTUK PPT & DASHBOARD ---
+                satker_summary["realisasi"] += total_realisasi_baris
+                satker_summary["outstanding"] += nilai_outstanding
+                
+                if current_komponen_name in component_metrics:
+                    component_metrics[current_komponen_name]["realisasi"] += total_realisasi_baris
+                    
+                if current_komponen_name in sub_component_realisasi and current_subkomponen_name:
+                    if current_subkomponen_name in sub_component_realisasi[current_komponen_name]:
+                        sub_component_realisasi[current_komponen_name][current_subkomponen_name] += total_realisasi_baris
+                        
+    # --- FINALISASI PERHITUNGAN SUMMARY PPT ---
+    satker_summary["pagu"] = satker_pagu
+    satker_summary["blokir"] = satker_blokir
+    satker_summary["sisa"] = satker_pagu - satker_blokir - satker_summary["realisasi"]
+    
+    for komp_name, m in component_metrics.items():
+        m["sisa"] = m["pagu"] - m["blokir"] - m["realisasi"]
+        m["persen"] = (m["realisasi"] / (m["pagu"] - m["blokir"]) * 100) if (m["pagu"] - m["blokir"]) > 0 else 0
+        
+    for komp_name, subs in sub_component_sisa.items():
+        for sub_name in subs:
+            realisasi_sub = sub_component_realisasi[komp_name].get(sub_name, 0)
+            sub_component_sisa[komp_name][sub_name] -= realisasi_sub # Sisa Akhir = Sisa Awal (Pagu-Blokir) - Realisasi
 
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
-    return output.getvalue(), data_ditemukan, pd.DataFrame(summary_preview), total_blokir_satker
+    return output.getvalue(), data_ditemukan, satker_summary, component_metrics, sub_component_realisasi, sub_component_sisa
 
 # ==========================================
 # FUNGSI PEMBUATAN FILE POWERPOINT (PPTX) 
 # ==========================================
-def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, sub_component_realisasi, sub_component_sisa, total_blokir_satker=0):
+def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, sub_component_realisasi, sub_component_sisa):
     prs = Presentation()
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
@@ -452,16 +409,17 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
     add_slide_header(slide2, "Ringkasan Kinerja Anggaran")
     
     total_pagu = satker_summary["pagu"]
+    total_blokir = satker_summary["blokir"]
     total_realisasi = satker_summary["realisasi"]
-    total_sisa_sebelum_blokir = satker_summary["sisa"]
-    sisa_efektif = total_sisa_sebelum_blokir - total_blokir_satker
-    persen_nasional = (total_realisasi / total_pagu * 100) if total_pagu > 0 else 0
+    total_sisa = satker_summary["sisa"]
+    pagu_efektif = total_pagu - total_blokir
+    persen_nasional = (total_realisasi / pagu_efektif * 100) if pagu_efektif > 0 else 0
     
     metrics = [
         ("Total Pagu", f"Rp {total_pagu:,.0f}"),
-        ("Diblokir", f"Rp {total_blokir_satker:,.0f}"),
+        ("Diblokir", f"Rp {total_blokir:,.0f}"),
         ("Total Realisasi", f"Rp {total_realisasi:,.0f}"),
-        ("Sisa Efektif", f"Rp {sisa_efektif:,.0f}"),
+        ("Sisa Efektif", f"Rp {total_sisa:,.0f}"),
         ("Penyerapan", f"{persen_nasional:.2f}%")
     ]
     
@@ -486,7 +444,7 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
         c_table = slide2.shapes.add_table(rows, cols, Inches(0.8), Inches(3.4), Inches(11.7), Inches(0.4 * rows)).table
         c_table.columns[0].width, c_table.columns[1].width, c_table.columns[2].width, c_table.columns[3].width, c_table.columns[4].width = Inches(4.5), Inches(2.0), Inches(2.0), Inches(2.0), Inches(1.2)
         
-        headers = ["Komponen Utama", "Pagu Anggaran (Rp)", "Total Realisasi (Rp)", "Sisa Anggaran (Rp)", "% Realisasi"]
+        headers = ["Komponen Utama", "Pagu Efektif (Rp)", "Total Realisasi (Rp)", "Sisa Anggaran (Rp)", "% Realisasi"]
         for col_idx, h_text in enumerate(headers):
             cell = c_table.cell(0, col_idx); cell.text = h_text
             cell.fill.solid(); cell.fill.fore_color.rgb = DEEP_TEAL
@@ -495,7 +453,8 @@ def create_powerpoint_report(satker_summary, component_metrics, monthly_totals, 
             
         for r_idx, (komp_name, m) in enumerate(component_metrics.items(), start=1):
             row_color = WHITE if r_idx % 2 != 0 else LIGHT_BG
-            data = [komp_name, f"Rp {m['pagu']:,.0f}", f"Rp {m['realisasi']:,.0f}", f"Rp {m['sisa']:,.0f}", f"{m['persen']:.2f}%"]
+            pagu_efektif_komp = m["pagu"] - m["blokir"]
+            data = [komp_name, f"Rp {pagu_efektif_komp:,.0f}", f"Rp {m['realisasi']:,.0f}", f"Rp {m['sisa']:,.0f}", f"{m['persen']:.2f}%"]
             for c_idx, val in enumerate(data):
                 cell = c_table.cell(r_idx, c_idx); cell.text = val
                 cell.fill.solid(); cell.fill.fore_color.rgb = row_color
@@ -649,23 +608,23 @@ if file_rab and file_lra_list:
         list_semua_bulan = ['JANUARI', 'FEBRUARI', 'MARET', 'APRIL', 'MEI', 'JUNI', 'JULI', 'AGUSTUS', 'SEPTEMBER', 'OKTOBER', 'NOVEMBER', 'DESEMBER']
         
         try:
-            with st.status("Sedang memproses dokumen dan menyusun ringkasan (Cached)...", expanded=True) as status:
-                st.write("Mengekstrak data dari seluruh LRA (Realisasi & Outstanding)...")
+            with st.status("Sedang memproses dokumen dan menyusun ringkasan...", expanded=True) as status:
+                st.write("Mengekstrak data dari seluruh LRA...")
                 lra_files_tuple = tuple((f.name, f.getvalue()) for f in file_lra_list)
                 list_bulan_tuple = tuple(list_semua_bulan)
                 
-                data_realisasi, satker_summary, monthly_totals, component_summary, component_metrics, sub_component_realisasi, sub_component_sisa = parse_lra_files_cached(lra_files_tuple, list_bulan_tuple)
+                data_realisasi, monthly_totals = parse_lra_files_cached(lra_files_tuple, list_bulan_tuple)
                 
-                st.write("Menyelaraskan dengan RAB & Mengekstrak Kolom Blokir (T)...")
+                st.write("Menyelaraskan dengan RAB & Mengekstrak Data untuk Summary...")
                 rab_bytes = file_rab.getvalue()
-                output_excel_bytes, data_ditemukan, df_preview, total_blokir_satker = process_rab_lra_cached(rab_bytes, data_realisasi, list_bulan_tuple)
+                output_excel_bytes, data_ditemukan, satker_summary, component_metrics, sub_component_realisasi, sub_component_sisa = process_rab_lra_cached(rab_bytes, data_realisasi, list_bulan_tuple)
                 
                 st.write("Menyiapkan dokumen presentasi PowerPoint (.pptx)...")
-                ppt_output_bytes = create_powerpoint_report(satker_summary, component_metrics, monthly_totals, sub_component_realisasi, sub_component_sisa, total_blokir_satker)
+                ppt_output_bytes = create_powerpoint_report(satker_summary, component_metrics, monthly_totals, sub_component_realisasi, sub_component_sisa)
                 
                 status.update(label="Proses Selesai!", state="complete", expanded=False)
 
-            st.success(f"🎉 SUKSES!")
+            st.success(f"🎉 SUKSES! Data diselaraskan dan Sheet diubah menjadi 'DATA'.")
             st.divider()
 
             # ==========================================
@@ -673,54 +632,30 @@ if file_rab and file_lra_list:
             # ==========================================
             st.subheader("📈 Executive Summary")
             total_pagu_all = satker_summary["pagu"]
-            total_realisasi_incl_out = satker_summary["realisasi"]
-            total_sisa_awal = satker_summary["sisa"]
-            total_sisa_efektif = total_sisa_awal - total_blokir_satker
-            persen_nasional = (total_realisasi_incl_out / total_pagu_all * 100) if total_pagu_all > 0 else 0
+            total_blokir_all = satker_summary["blokir"]
+            total_realisasi_all = satker_summary["realisasi"]
+            total_sisa_all = satker_summary["sisa"]
+            pagu_efektif_all = total_pagu_all - total_blokir_all
+            persen_nasional = (total_realisasi_all / pagu_efektif_all * 100) if pagu_efektif_all > 0 else 0
 
             m1, m2, m3, m4, m5 = st.columns(5)
             m1.metric("💰 Total Pagu", f"Rp {total_pagu_all:,.0f}")
-            m2.metric("🛑 Diblokir", f"Rp {total_blokir_satker:,.0f}")
-            m3.metric("📉 Total Realisasi", f"Rp {total_realisasi_incl_out:,.0f}")
-            m4.metric("🟡 Sisa Efektif", f"Rp {total_sisa_efektif:,.0f}")
-            m5.metric("📊 Persentase", f"{persen_nasional:.2f}%")
+            m2.metric("🛑 Diblokir", f"Rp {total_blokir_all:,.0f}")
+            m3.metric("📉 Total Realisasi", f"Rp {total_realisasi_all:,.0f}")
+            m4.metric("🟡 Sisa Efektif", f"Rp {total_sisa_all:,.0f}")
+            m5.metric("📊 Penyerapan", f"{persen_nasional:.2f}%")
 
             if component_metrics:
                 st.markdown("---")
-                st.markdown("### 🏷️ Summary Berdasarkan Kegiatan")
+                st.markdown("### 🏷️ Summary Berdasarkan Komponen")
                 comp_cols = st.columns(2)
                 for idx, (komp_name, metrics) in enumerate(component_metrics.items()):
                     with comp_cols[idx % 2]:
                         st.markdown(f"**{komp_name}**")
                         sub_c1, sub_c2 = st.columns(2)
-                        sub_c1.metric("Pagu", f"Rp {metrics['pagu']:,.0f}"); sub_c1.metric("Realisasi", f"Rp {metrics['realisasi']:,.0f}")
+                        pagu_efektif_komp = metrics['pagu'] - metrics['blokir']
+                        sub_c1.metric("Pagu Efektif", f"Rp {pagu_efektif_komp:,.0f}"); sub_c1.metric("Realisasi", f"Rp {metrics['realisasi']:,.0f}")
                         sub_c2.metric("Sisa", f"Rp {metrics['sisa']:,.0f}"); sub_c2.metric("Persentase", f"{metrics['persen']:.2f}%")
-
-            st.markdown("---")
-            
-            # ==========================================
-            # FITUR BARU: PROYEKSI PENYERAPAN (BURN-RATE FORECASTING)
-            # ==========================================
-            st.markdown("### 🔮 Burn-Rate Forecasting")
-            
-            active_months_list = [b for b, val in monthly_totals.items() if val > 0]
-            num_active_months = len(active_months_list)
-            
-            if num_active_months > 0:
-                avg_monthly_burn = total_realisasi_incl_out / num_active_months
-                projected_end_year = avg_monthly_burn * 12
-                projected_forecast_pct = (projected_end_year / total_pagu_all * 100) if total_pagu_all > 0 else 0
-                
-                f_col1, f_col2, f_col3 = st.columns(3)
-                f_col1.metric("📅 Bulan Aktif Terdeteksi", f"{num_active_months} Bulan")
-                f_col2.metric("⚡ Rata-rata Burn Rate / Bulan", f"Rp {avg_monthly_burn:,.0f}")
-                f_col3.metric("🎯 Proyeksi Akhir Tahun", f"Rp {projected_end_year:,.0f}", f"{projected_forecast_pct:.2f}%")
-                
-                if projected_forecast_pct > 100: st.warning("⚠️ **Peringatan Over-Absorbtion**: Berdasarkan kecepatan penyerapan saat ini (*burn rate*), proyeksi pengeluaran melebihi total pagu anggaran. Perlu penyesuaian strategi.")
-                elif projected_forecast_pct < 85: st.info("💡 **Catatan Under-Absorbtion**: Proyeksi penyerapan akhir tahun berada di bawah 85%. Akselerasi kegiatan di sisa bulan diperlukan untuk menghindari penumpukan anggaran.")
-                else: st.success("✅ **Status Penyerapan Seimbang**: Proyeksi penyerapan berjalan optimal sesuai target anggaran.")
-            else:
-                st.info("Data bulanan aktif belum mencukupi untuk melakukan kalkulasi Burn-Rate Forecasting.")
 
             st.markdown("---")
             
@@ -729,9 +664,7 @@ if file_rab and file_lra_list:
             # ==========================================
             st.markdown("### 📊 REALISASI Bulanan")
             
-            realisasi_per_bulan = [df_preview[bulan].max() if (bulan in df_preview.columns and not df_preview[bulan].empty) else 0 for bulan in list_semua_bulan]
-            realisasi_per_bulan = [val if pd.notna(val) else 0 for val in realisasi_per_bulan]
-
+            realisasi_per_bulan = [monthly_totals.get(b, 0) for b in list_semua_bulan]
             df_monthly_chart = pd.DataFrame({"Bulan": list_semua_bulan, "Realisasi": realisasi_per_bulan})
             df_monthly_chart["Realisasi_Juta"] = df_monthly_chart["Realisasi"] / 1_000_000
             
@@ -741,121 +674,6 @@ if file_rab and file_lra_list:
             fig_3d_bar.update_traces(textposition='outside', textfont_size=11, marker_line_color='rgb(8,48,107)', marker_line_width=1.5, opacity=0.9)
             fig_3d_bar.update_layout(plot_bgcolor="rgba(245,247,250,0.8)", paper_bgcolor="rgba(0,0,0,0)", font=dict(color="black", size=12), xaxis_title="Bulan", yaxis_title="Total Realisasi (Juta Rp)", height=480, uniformtext_minsize=8, uniformtext_mode='hide')
             st.plotly_chart(fig_3d_bar, use_container_width=True)
-
-            # ==========================================
-            # DASHBOARD UI: REALISASI & SISA SUB KOMPONEN
-            # ==========================================
-            st.markdown("---")
-            st.markdown("### 📋 Realisasi Berdasarkan Kegiatan")
-            
-            chart_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2']
-            
-            if sub_component_realisasi:
-                komp_keys = list(sub_component_realisasi.keys())
-                sub_cols = st.columns(2)
-                
-                for idx, komp_name in enumerate(komp_keys):
-                    with sub_cols[idx % 2]:
-                        st.markdown(f"**{komp_name}**")
-                        sub_dict = sub_component_realisasi[komp_name]
-                        
-                        sub_dict_filtered = {k: float(v) for k, v in sub_dict.items() if pd.notna(v) and float(v) >= 0}
-                                
-                        if len(sub_dict_filtered) > 0:
-                            sub_labels = sorted(list(sub_dict_filtered.keys())) 
-                            sub_values = [sub_dict_filtered[l] for l in sub_labels]
-                            total_komp_val = sum(sub_values)
-                            
-                            if total_komp_val > 0:
-                                fig_donut = go.Figure(data=[go.Pie(
-                                    labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels],
-                                    values=sub_values,
-                                    hole=0.45,
-                                    textinfo='percent+label',
-                                    hoverinfo='none',
-                                    textfont=dict(size=11, color='#000000'),
-                                    marker=dict(colors=chart_colors[:len(sub_labels)], line=dict(color="#332D2D", width=2))
-                                )])
-                                fig_donut.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", margin=dict(t=20, b=20, l=20, r=20), showlegend=False, height=280)
-                                st.plotly_chart(fig_donut, use_container_width=True)
-                            else:
-                                st.info("Seluruh sub komponen belum memiliki realisasi (Rp 0).")
-                            
-                            head_c = st.columns([0.5, 4.5, 2.5, 2])
-                            with head_c[0]: st.markdown("")
-                            with head_c[1]: st.markdown("**Sub Komponen**")
-                            with head_c[2]: st.markdown("**Realisasi (Rp)**")
-                            with head_c[3]: st.markdown("**%**")
-                            st.markdown("<hr style='margin: 4px 0px 8px 0px;'>", unsafe_allow_html=True)
-
-                            for i, (label, val) in enumerate(zip(sub_labels, sub_values)):
-                                color_hex = chart_colors[i % len(chart_colors)]
-                                pct = (val / total_komp_val * 100) if total_komp_val > 0 else 0
-                                
-                                row_c = st.columns([0.5, 4.5, 2.5, 2])
-                                with row_c[0]: st.markdown(f"<div style='width:14px; height:14px; background-color:{color_hex}; border-radius:3px; margin-top:5px;'></div>", unsafe_allow_html=True)
-                                with row_c[1]: st.markdown(f"<span style='font-size:12px; color:#212529;'>{label}</span>", unsafe_allow_html=True)
-                                with row_c[2]: st.markdown(f"<span style='font-size:12px; font-weight:500; color:#212529;'>Rp {val:,.0f}</span>", unsafe_allow_html=True)
-                                with row_c[3]: st.markdown(f"<span style='font-size:12px; font-weight:600; color:#495057;'>{pct:.2f}%</span>", unsafe_allow_html=True)
-                        else:
-                            st.info("Data realisasi belum tersedia (Rp 0).")
-            else:
-                st.info("Data realisasi sub komponen belum tersedia.")
-
-            st.markdown("---")
-            st.markdown("### 📋 Rincian Sisa Anggaran Per Kegiatan")
-            
-            if sub_component_sisa:
-                komp_keys_sisa = list(sub_component_sisa.keys())
-                sisa_cols = st.columns(2)
-                
-                for idx, komp_name in enumerate(komp_keys_sisa):
-                    with sisa_cols[idx % 2]:
-                        st.markdown(f"**{komp_name}**")
-                        sisa_dict = sub_component_sisa[komp_name]
-                        
-                        sisa_dict_filtered = {k: float(v) for k, v in sisa_dict.items() if pd.notna(v) and float(v) >= 0}
-                        
-                        if len(sisa_dict_filtered) > 0:
-                            sub_labels_sisa = sorted(list(sisa_dict_filtered.keys())) 
-                            sub_values_sisa = [sisa_dict_filtered[l] for l in sub_labels_sisa]
-                            total_komp_sisa_val = sum(sub_values_sisa)
-                            
-                            colors_sisa = ['#DAA520', '#CD853F', '#D2691E', '#B8860B', '#8B4513', '#A0522D', '#D2B48C']
-                            
-                            if total_komp_sisa_val > 0:
-                                fig_donut_sisa = go.Figure(data=[go.Pie(
-                                    labels=[f"Sub {l.split('-')[0].strip()}" for l in sub_labels_sisa],
-                                    values=sub_values_sisa,
-                                    hole=0.45,
-                                    textinfo='percent+label',
-                                    hoverinfo='none',
-                                    textfont=dict(size=11, color='#000000'),
-                                    marker=dict(colors=colors_sisa[:len(sub_labels_sisa)], line=dict(color="#272525", width=2))
-                                )])
-                                fig_donut_sisa.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", margin=dict(t=20, b=20, l=20, r=20), showlegend=False, height=280)
-                                st.plotly_chart(fig_donut_sisa, use_container_width=True)
-                            else:
-                                st.info("Seluruh anggaran telah terealisasi (Sisa Rp 0).")
-                                
-                            head_s = st.columns([0.5, 4.5, 2.5, 2])
-                            with head_s[0]: st.markdown("")
-                            with head_s[1]: st.markdown("**Sub Komponen**")
-                            with head_s[2]: st.markdown("**Sisa (Rp)**")
-                            with head_s[3]: st.markdown("**%**")
-                            st.markdown("<hr style='margin: 4px 0px 8px 0px;'>", unsafe_allow_html=True)
-
-                            for i, (label_sisa, val_sisa) in enumerate(zip(sub_labels_sisa, sub_values_sisa)):
-                                color_hex_sisa = colors_sisa[i % len(colors_sisa)]
-                                pct_sisa = (val_sisa / total_komp_sisa_val * 100) if total_komp_sisa_val > 0 else 0
-                                
-                                row_s = st.columns([0.5, 4.5, 2.5, 2])
-                                with row_s[0]: st.markdown(f"<div style='width:14px; height:14px; background-color:{color_hex_sisa}; border-radius:3px; margin-top:5px;'></div>", unsafe_allow_html=True)
-                                with row_s[1]: st.markdown(f"<span style='font-size:12px; color:#212529;'>{label_sisa}</span>", unsafe_allow_html=True)
-                                with row_s[2]: st.markdown(f"<span style='font-size:12px; font-weight:500; color:#212529;'>Rp {val_sisa:,.0f}</span>", unsafe_allow_html=True)
-                                with row_s[3]: st.markdown(f"<span style='font-size:12px; font-weight:600; color:#495057;'>{pct_sisa:.2f}%</span>", unsafe_allow_html=True)
-                        else:
-                            st.info("Seluruh anggaran telah terealisasi (Sisa Rp 0).")
 
             # ==========================================
             # DOWNLOAD BUTTONS

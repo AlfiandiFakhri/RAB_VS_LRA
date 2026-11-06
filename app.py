@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 import numpy as np
 import matplotlib.pyplot as plt
 from difflib import SequenceMatcher
+import copy as cp
 
 # Pengaman untuk Library PowerPoint
 try:
@@ -267,7 +268,7 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
     
     # Penambahan kolom BLOKIR ANGGARAN
     kolom_baru = ["TOTAL Realisasi", "SISA", "OUT STANDING", "BLOKIR ANGGARAN", "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER", "KETERANGAN"]
-    header_ref = ws.cell(row=baris_header, column=19)
+    header_ref = ws.cell(row=baris_header, column=19) # Kolom S
     start_col = 20
     
     warna_hijau = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
@@ -290,12 +291,14 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
         else:
             if header_ref.has_style: cell.fill = copy(header_ref.fill)
 
-    # Penyesuaian Lebar Kolom
-    ws.column_dimensions[get_column_letter(20)].width = 20.5 # Total Realisasi
-    ws.column_dimensions[get_column_letter(21)].width = 18.2 # Sisa
-    ws.column_dimensions[get_column_letter(22)].width = 18.2 # Outstanding
-    ws.column_dimensions[get_column_letter(23)].width = 18.2 # Blokir Anggaran
-    for c_idx in range(24, 36): ws.column_dimensions[get_column_letter(c_idx)].width = 15.0 # Bulan-bulan
+    # Penyesuaian Lebar Kolom Diperbesar Untuk Menghindari "#######"
+    ws.column_dimensions[get_column_letter(19)].width = 25.0 # Pagu / Jumlah
+    ws.column_dimensions[get_column_letter(20)].width = 25.0 # Total Realisasi
+    ws.column_dimensions[get_column_letter(21)].width = 25.0 # Sisa
+    ws.column_dimensions[get_column_letter(22)].width = 25.0 # Outstanding
+    ws.column_dimensions[get_column_letter(23)].width = 25.0 # Blokir Anggaran
+    for c_idx in range(24, 36): 
+        ws.column_dimensions[get_column_letter(c_idx)].width = 22.0 # Bulan-bulan diperlebar
     ws.column_dimensions[get_column_letter(36)].width = 35.0 # Keterangan
 
     max_row = ws.max_row
@@ -304,7 +307,6 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
     baris_terpakai = set()
     summary_preview = []
     
-    import copy as cp
     data_realisasi = cp.deepcopy(data_realisasi_tuple)
 
     for row_idx in range(baris_mulai_data, max_row + 1):
@@ -362,7 +364,9 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                 baris_terpakai.add(target_row)
                 
                 ws.cell(row=target_row, column=22).value = nilai_outstanding
-                ws.cell(row=target_row, column=23).value = 0 # Inisialisasi awal Blokir = 0
+                
+                # REVISI: Mengambil rumus/value secara persis dari kolom Pagu/Jumlah (Kolom 19 / Kolom S)
+                ws.cell(row=target_row, column=23).value = ws.cell(row=target_row, column=19).value 
                 
                 row_bulanan_val = {}
                 for idx_b, b_name in enumerate(list_semua_bulan):
@@ -382,7 +386,7 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                     "Pagu": pagu_val,
                     "Realisasi": sum(row_bulanan_val.values()) + nilai_outstanding,
                     "Outstanding": nilai_outstanding,
-                    "Blokir": 0,
+                    "Blokir": pagu_val, # REVISI: Disamakan dengan pagu untuk display metrik di dataframe
                     **row_bulanan_val
                 })
 

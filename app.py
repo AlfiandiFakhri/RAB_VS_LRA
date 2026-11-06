@@ -425,6 +425,43 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                         c.alignment = copy(data_ref.alignment)
                         c.number_format = copy(data_ref.number_format)
 
+    # =========================================================================
+    # PASS 3: AUTOFIT KOLOM (Mencegah ########)
+    # =========================================================================
+    for col_idx in range(19, 37): # Dari kolom Jumlah (S) sampai Keterangan (AJ)
+        col_letter = get_column_letter(col_idx)
+        max_len = 0
+        for row in range(baris_header, max_row + 1):
+            cell = ws.cell(row=row, column=col_idx)
+            val = cell.value
+            if val is not None:
+                # Perkiraan panjang jika formula (biasanya angka miliaran/triliunan)
+                if isinstance(val, str) and val.startswith('='):
+                    panjang = 20 # Estimasi lebar untuk angka besar
+                elif isinstance(val, (int, float)):
+                    # Format ribuan agar sesuai dengan yang ditampilkan Excel
+                    panjang = len(f"{val:,.0f}")
+                else:
+                    panjang = len(str(val))
+                    
+                if panjang > max_len:
+                    max_len = panjang
+                    
+        # Tambah padding
+        adjusted_width = max_len + 3.5
+        
+        # Atur batas minimal per kelompok kolom agar rapi dan tidak terlalu sempit
+        if col_idx == 19: # Kolom Jumlah/Pagu
+            adjusted_width = max(adjusted_width, 18)
+        elif 20 <= col_idx <= 23: # Total, Sisa, Outstanding, Blokir
+            adjusted_width = max(adjusted_width, 22)
+        elif 24 <= col_idx <= 35: # Bulan-bulan
+            adjusted_width = max(adjusted_width, 18)
+        elif col_idx == 36: # Keterangan
+            adjusted_width = max(adjusted_width, 35)
+            
+        ws.column_dimensions[col_letter].width = adjusted_width
+
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)

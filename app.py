@@ -11,7 +11,6 @@ import plotly.graph_objects as go
 import numpy as np
 import matplotlib.pyplot as plt
 from difflib import SequenceMatcher
-import copy as cp
 
 # Pengaman untuk Library PowerPoint
 try:
@@ -274,7 +273,7 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
     warna_hijau = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
     warna_kuning = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
     warna_orange = PatternFill(start_color="FCD5B4", end_color="FCD5B4", fill_type="solid") 
-    warna_merah_muda = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid") 
+    warna_merah_muda = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid") # Warna untuk blokir
     
     for i, nama_kolom in enumerate(kolom_baru):
         cell = ws.cell(row=baris_header, column=start_col + i)
@@ -291,14 +290,14 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
         else:
             if header_ref.has_style: cell.fill = copy(header_ref.fill)
 
-    # Penyesuaian Lebar Kolom Diperlebar
-    ws.column_dimensions[get_column_letter(19)].width = 25.0 
-    ws.column_dimensions[get_column_letter(20)].width = 25.0 
-    ws.column_dimensions[get_column_letter(21)].width = 25.0 
-    ws.column_dimensions[get_column_letter(22)].width = 25.0 
-    ws.column_dimensions[get_column_letter(23)].width = 25.0 
-    for c_idx in range(24, 36): ws.column_dimensions[get_column_letter(c_idx)].width = 25.0 
-    ws.column_dimensions[get_column_letter(36)].width = 35.0 
+    # Penyesuaian Lebar Kolom (Diperlebar untuk menghindari "#######")
+    ws.column_dimensions[get_column_letter(19)].width = 25.0 # Kolom S (Jumlah/Pagu)
+    ws.column_dimensions[get_column_letter(20)].width = 25.0 # Total Realisasi
+    ws.column_dimensions[get_column_letter(21)].width = 25.0 # Sisa
+    ws.column_dimensions[get_column_letter(22)].width = 25.0 # Outstanding
+    ws.column_dimensions[get_column_letter(23)].width = 25.0 # Blokir Anggaran
+    for c_idx in range(24, 36): ws.column_dimensions[get_column_letter(c_idx)].width = 25.0 # Bulan-bulan
+    ws.column_dimensions[get_column_letter(36)].width = 35.0 # Keterangan
 
     max_row = ws.max_row
     data_ditemukan = 0
@@ -306,6 +305,7 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
     baris_terpakai = set()
     summary_preview = []
     
+    import copy as cp
     data_realisasi = cp.deepcopy(data_realisasi_tuple)
 
     for row_idx in range(baris_mulai_data, max_row + 1):
@@ -336,79 +336,63 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
             for kamar in kamar_opsi:
                 if kamar in data_realisasi:
                     for key, dict_bulanan in data_realisasi[kamar].items():
+                        
                         score = get_similarity_score(key, uraian_rab)
+                        
                         if score > highest_score and score >= 0.80:
                             highest_score = score
                             best_match = (kamar, key)
+                            
                         if highest_score == 1.0:
                             break
+                            
                 if highest_score == 1.0:
                     break
             
-            # CEK KECOCOKAN LRA
-            is_matched = False
             if best_match:
                 kamar_ketemu, key_ketemu = best_match
                 dict_bulanan = data_realisasi[kamar_ketemu].pop(key_ketemu) 
                 nilai_outstanding = dict_bulanan.pop('OUTSTANDING', 0)
-                is_matched = True
-            else:
-                # Jika tidak match / 0 realisasi
-                dict_bulanan = {b: 0 for b in list_semua_bulan}
-                nilai_outstanding = 0
-                is_matched = False
                 
-            target_row = row_idx
-            for r_cek in range(row_idx, min(row_idx + 6, max_row + 1)):
-                val_s = ws.cell(row=r_cek, column=19).value
-                if val_s is not None and r_cek not in baris_terpakai:
-                    target_row = r_cek
-                    break
-            baris_terpakai.add(target_row)
-            
-            ws.cell(row=target_row, column=22).value = nilai_outstanding
-            ws.cell(row=target_row, column=23).value = 0 # Inisialisasi awal Blokir = 0
-            
-            row_bulanan_val = {}
-            for idx_b, b_name in enumerate(list_semua_bulan):
-                val_b = dict_bulanan[b_name]
-                ws.cell(row=target_row, column=24 + idx_b).value = val_b 
-                row_bulanan_val[b_name] = val_b
-            
-            ws.cell(row=target_row, column=20).value = f"=SUM(X{target_row}:AI{target_row})+V{target_row}"
-            ws.cell(row=target_row, column=21).value = f"=S{target_row}-T{target_row}-W{target_row}"
-
-            pagu_val = get_row_pagu(ws, target_row)
-            summary_preview.append({
-                "Komponen": rab_komp,
-                "Uraian": uraian_rab,
-                "Pagu": pagu_val,
-                "Realisasi": sum(row_bulanan_val.values()) + nilai_outstanding,
-                "Outstanding": nilai_outstanding,
-                "Blokir": 0,
-                **row_bulanan_val
-            })
-
-            data_ref = ws.cell(row=target_row, column=19)
-            warna_merah_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
-            
-            for c_idx in range(20, 37):
-                c = ws.cell(row=target_row, column=c_idx)
-                if data_ref.has_style:
-                    c.font = copy(data_ref.font)
-                    c.border = copy(data_ref.border)
-                    c.alignment = copy(data_ref.alignment)
-                    c.number_format = copy(data_ref.number_format)
+                target_row = row_idx
+                for r_cek in range(row_idx, min(row_idx + 6, max_row + 1)):
+                    val_s = ws.cell(row=r_cek, column=19).value
+                    if val_s is not None and r_cek not in baris_terpakai:
+                        target_row = r_cek
+                        break
+                baris_terpakai.add(target_row)
                 
-                # PEWARNAAN MERAH JIKA TIDAK ADA DATA DI LRA
-                if not is_matched:
-                    c.fill = warna_merah_fill
-                    if c.font: # Berikan warna teks putih supaya tulisan tetap terlihat jelas di background merah
-                        c.font = Font(name=c.font.name, size=c.font.size, bold=c.font.bold, italic=c.font.italic, color="FFFFFF")
-                    else:
-                        c.font = Font(color="FFFFFF")
-            
-            if is_matched:
+                ws.cell(row=target_row, column=22).value = nilai_outstanding
+                ws.cell(row=target_row, column=23).value = 0 # Inisialisasi awal Blokir = 0
+                
+                row_bulanan_val = {}
+                for idx_b, b_name in enumerate(list_semua_bulan):
+                    val_b = dict_bulanan[b_name]
+                    ws.cell(row=target_row, column=24 + idx_b).value = val_b # Indeks bulan tergeser jadi mulai di kolom 24
+                    row_bulanan_val[b_name] = val_b
+                
+                # Rumus Total Realisasi menjumlahkan kolom X (Jan) hingga AI (Des) + V (Outstanding)
+                ws.cell(row=target_row, column=20).value = f"=SUM(X{target_row}:AI{target_row})+V{target_row}"
+                # Rumus Sisa mengurangi Pagu (S) dengan Total Realisasi (T) dan Blokir Anggaran (W)
+                ws.cell(row=target_row, column=21).value = f"=S{target_row}-T{target_row}-W{target_row}"
+
+                pagu_val = get_row_pagu(ws, target_row)
+                summary_preview.append({
+                    "Komponen": rab_komp,
+                    "Uraian": uraian_rab,
+                    "Pagu": pagu_val,
+                    "Realisasi": sum(row_bulanan_val.values()) + nilai_outstanding,
+                    "Outstanding": nilai_outstanding,
+                    "Blokir": 0,
+                    **row_bulanan_val
+                })
+
+                data_ref = ws.cell(row=target_row, column=19)
+                # Range format styling diperpanjang hingga kolom 37 (mencakup KETERANGAN)
+                for c_idx in range(20, 37):
+                    c = ws.cell(row=target_row, column=c_idx)
+                    if data_ref.has_style:
+                        c.font, c.border, c.alignment, c.number_format = copy(data_ref.font), copy(data_ref.border), copy(data_ref.alignment), copy(data_ref.number_format)
                 data_ditemukan += 1
 
     output = io.BytesIO()

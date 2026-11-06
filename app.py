@@ -322,9 +322,15 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
         kamar_rab_saat_ini = f"{rab_komp}_{rab_sub}_{rab_akun}"
         
         bagian_teks = []
-        for col_idx in range(3, 5): # Perbaikan: Hanya ambil kolom 3 dan 4 agar volume/satuan tidak ikut terbaca
+        # KEMBALIKAN KE RANGE(3, 7) AGAR URAIAN YG MENJOROK KE KANAN TETAP TERBACA
+        for col_idx in range(3, 7): 
             val = ws.cell(row=row_idx, column=col_idx).value
-            if val and isinstance(val, str) and str(val).strip() not in ['-', '']: bagian_teks.append(str(val).strip())
+            if val and isinstance(val, str) and str(val).strip() not in ['-', '']: 
+                text_val = str(val).strip()
+                # Hindari memasukkan kata-kata satuan ukur/volume ke dalam pencarian teks
+                if re.match(r'^(Org\s*x|HR\s*x|KL|PKT\s*x|Jam\s*x|x|OP|Bulan)$', text_val, re.IGNORECASE):
+                    continue
+                bagian_teks.append(text_val)
         
         if bagian_teks:
             uraian_rab = " ".join(bagian_teks)
@@ -350,7 +356,6 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
             
             if best_match:
                 kamar_ketemu, key_ketemu = best_match
-                # Perbaikan 1: Gunakan .get() agar data tidak hilang (pop dihapus)
                 dict_bulanan = data_realisasi[kamar_ketemu].get(key_ketemu, {b: 0 for b in list_semua_bulan}) 
                 nilai_outstanding = dict_bulanan.get('OUTSTANDING', 0)
                 
@@ -368,12 +373,10 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                 row_bulanan_val = {}
                 for idx_b, b_name in enumerate(list_semua_bulan):
                     val_b = dict_bulanan.get(b_name, 0)
-                    ws.cell(row=target_row, column=24 + idx_b).value = val_b # Indeks bulan tergeser jadi mulai di kolom 24
+                    ws.cell(row=target_row, column=24 + idx_b).value = val_b 
                     row_bulanan_val[b_name] = val_b
                 
-                # Rumus Total Realisasi menjumlahkan kolom X (Jan) hingga AI (Des) + V (Outstanding)
                 ws.cell(row=target_row, column=20).value = f"=SUM(X{target_row}:AI{target_row})+V{target_row}"
-                # Rumus Sisa mengurangi Pagu (S) dengan Total Realisasi (T) dan Blokir Anggaran (W)
                 ws.cell(row=target_row, column=21).value = f"=S{target_row}-T{target_row}-W{target_row}"
 
                 pagu_val = get_row_pagu(ws, target_row)
@@ -388,23 +391,20 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                 })
 
                 data_ref = ws.cell(row=target_row, column=19)
-                # Range format styling diperpanjang hingga kolom 37 (mencakup KETERANGAN)
                 for c_idx in range(20, 37):
                     c = ws.cell(row=target_row, column=c_idx)
                     if data_ref.has_style:
                         c.font, c.border, c.alignment, c.number_format = copy(data_ref.font), copy(data_ref.border), copy(data_ref.alignment), copy(data_ref.number_format)
                 data_ditemukan += 1
-            else:
-                # -------------------------------------------------------------
-                # LOGIKA BARU: JIKA TIDAK ADA MATCHING DI LRA, ISI DENGAN 0
-                # -------------------------------------------------------------
+
+    # =========================================================================
+    # PASS 2: ISI ANGKA 0 UNTUK SEMUA BARIS YANG PUNYA PAGU TAPI BELUM TERISI
+    # =========================================================================
+    for row_idx in range(baris_mulai_data, max_row + 1):
+        if row_idx not in baris_terpakai:
+            val_s = ws.cell(row=row_idx, column=19).value
+            if val_s is not None and str(val_s).strip() != '':
                 target_row = row_idx
-                # Cari sel berisikan "Jumlah" (Pagu) di kolom 19
-                for r_cek in range(row_idx, min(row_idx + 6, max_row + 1)):
-                    val_s = ws.cell(row=r_cek, column=19).value
-                    if val_s is not None and str(val_s).strip() != '' and r_cek not in baris_terpakai:
-                        target_row = r_cek
-                        break
                 baris_terpakai.add(target_row)
                 
                 ws.cell(row=target_row, column=22).value = 0
@@ -420,8 +420,10 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                 for c_idx in range(20, 37):
                     c = ws.cell(row=target_row, column=c_idx)
                     if data_ref.has_style:
-                        c.font, c.border, c.alignment, c.number_format = copy(data_ref.font), copy(data_ref.border), copy(data_ref.alignment), copy(data_ref.number_format)
-
+                        c.font = copy(data_ref.font)
+                        c.border = copy(data_ref.border)
+                        c.alignment = copy(data_ref.alignment)
+                        c.number_format = copy(data_ref.number_format)
 
     output = io.BytesIO()
     wb.save(output)

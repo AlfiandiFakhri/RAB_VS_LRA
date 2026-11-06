@@ -322,15 +322,9 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
         kamar_rab_saat_ini = f"{rab_komp}_{rab_sub}_{rab_akun}"
         
         bagian_teks = []
-        # KEMBALIKAN KE RANGE(3, 7) AGAR URAIAN YG MENJOROK KE KANAN TETAP TERBACA
-        for col_idx in range(3, 7): 
+        for col_idx in range(3, 7):
             val = ws.cell(row=row_idx, column=col_idx).value
-            if val and isinstance(val, str) and str(val).strip() not in ['-', '']: 
-                text_val = str(val).strip()
-                # Hindari memasukkan kata-kata satuan ukur/volume ke dalam pencarian teks
-                if re.match(r'^(Org\s*x|HR\s*x|KL|PKT\s*x|Jam\s*x|x|OP|Bulan)$', text_val, re.IGNORECASE):
-                    continue
-                bagian_teks.append(text_val)
+            if val and isinstance(val, str) and str(val).strip() not in ['-', '']: bagian_teks.append(str(val).strip())
         
         if bagian_teks:
             uraian_rab = " ".join(bagian_teks)
@@ -344,7 +338,7 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                         
                         score = get_similarity_score(key, uraian_rab)
                         
-                        if score > highest_score and score >= 0.65:
+                        if score > highest_score and score >= 0.80:
                             highest_score = score
                             best_match = (kamar, key)
                             
@@ -356,13 +350,13 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
             
             if best_match:
                 kamar_ketemu, key_ketemu = best_match
-                dict_bulanan = data_realisasi[kamar_ketemu].get(key_ketemu, {b: 0 for b in list_semua_bulan}) 
-                nilai_outstanding = dict_bulanan.get('OUTSTANDING', 0)
+                dict_bulanan = data_realisasi[kamar_ketemu].pop(key_ketemu) 
+                nilai_outstanding = dict_bulanan.pop('OUTSTANDING', 0)
                 
                 target_row = row_idx
                 for r_cek in range(row_idx, min(row_idx + 6, max_row + 1)):
                     val_s = ws.cell(row=r_cek, column=19).value
-                    if val_s is not None and str(val_s).strip() != '' and r_cek not in baris_terpakai:
+                    if val_s is not None and r_cek not in baris_terpakai:
                         target_row = r_cek
                         break
                 baris_terpakai.add(target_row)
@@ -372,11 +366,13 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                 
                 row_bulanan_val = {}
                 for idx_b, b_name in enumerate(list_semua_bulan):
-                    val_b = dict_bulanan.get(b_name, 0)
-                    ws.cell(row=target_row, column=24 + idx_b).value = val_b 
+                    val_b = dict_bulanan[b_name]
+                    ws.cell(row=target_row, column=24 + idx_b).value = val_b # Indeks bulan tergeser jadi mulai di kolom 24
                     row_bulanan_val[b_name] = val_b
                 
+                # Rumus Total Realisasi menjumlahkan kolom X (Jan) hingga AI (Des) + V (Outstanding)
                 ws.cell(row=target_row, column=20).value = f"=SUM(X{target_row}:AI{target_row})+V{target_row}"
+                # Rumus Sisa mengurangi Pagu (S) dengan Total Realisasi (T) dan Blokir Anggaran (W)
                 ws.cell(row=target_row, column=21).value = f"=S{target_row}-T{target_row}-W{target_row}"
 
                 pagu_val = get_row_pagu(ws, target_row)
@@ -391,76 +387,12 @@ def process_rab_lra_cached(rab_bytes, data_realisasi_tuple, list_semua_bulan):
                 })
 
                 data_ref = ws.cell(row=target_row, column=19)
+                # Range format styling diperpanjang hingga kolom 37 (mencakup KETERANGAN)
                 for c_idx in range(20, 37):
                     c = ws.cell(row=target_row, column=c_idx)
                     if data_ref.has_style:
                         c.font, c.border, c.alignment, c.number_format = copy(data_ref.font), copy(data_ref.border), copy(data_ref.alignment), copy(data_ref.number_format)
                 data_ditemukan += 1
-
-    # =========================================================================
-    # PASS 2: ISI ANGKA 0 UNTUK SEMUA BARIS YANG PUNYA PAGU TAPI BELUM TERISI
-    # =========================================================================
-    for row_idx in range(baris_mulai_data, max_row + 1):
-        if row_idx not in baris_terpakai:
-            val_s = ws.cell(row=row_idx, column=19).value
-            if val_s is not None and str(val_s).strip() != '':
-                target_row = row_idx
-                baris_terpakai.add(target_row)
-                
-                ws.cell(row=target_row, column=22).value = 0
-                ws.cell(row=target_row, column=23).value = 0 
-                
-                for idx_b in range(len(list_semua_bulan)):
-                    ws.cell(row=target_row, column=24 + idx_b).value = 0
-                
-                ws.cell(row=target_row, column=20).value = f"=SUM(X{target_row}:AI{target_row})+V{target_row}"
-                ws.cell(row=target_row, column=21).value = f"=S{target_row}-T{target_row}-W{target_row}"
-
-                data_ref = ws.cell(row=target_row, column=19)
-                for c_idx in range(20, 37):
-                    c = ws.cell(row=target_row, column=c_idx)
-                    if data_ref.has_style:
-                        c.font = copy(data_ref.font)
-                        c.border = copy(data_ref.border)
-                        c.alignment = copy(data_ref.alignment)
-                        c.number_format = copy(data_ref.number_format)
-
-    # =========================================================================
-    # PASS 3: AUTOFIT KOLOM (Mencegah ########)
-    # =========================================================================
-    for col_idx in range(19, 37): # Dari kolom Jumlah (S) sampai Keterangan (AJ)
-        col_letter = get_column_letter(col_idx)
-        max_len = 0
-        for row in range(baris_header, max_row + 1):
-            cell = ws.cell(row=row, column=col_idx)
-            val = cell.value
-            if val is not None:
-                # Perkiraan panjang jika formula (biasanya angka miliaran/triliunan)
-                if isinstance(val, str) and val.startswith('='):
-                    panjang = 20 # Estimasi lebar untuk angka besar
-                elif isinstance(val, (int, float)):
-                    # Format ribuan agar sesuai dengan yang ditampilkan Excel
-                    panjang = len(f"{val:,.0f}")
-                else:
-                    panjang = len(str(val))
-                    
-                if panjang > max_len:
-                    max_len = panjang
-                    
-        # Tambah padding
-        adjusted_width = max_len + 3.5
-        
-        # Atur batas minimal per kelompok kolom agar rapi dan tidak terlalu sempit
-        if col_idx == 19: # Kolom Jumlah/Pagu
-            adjusted_width = max(adjusted_width, 18)
-        elif 20 <= col_idx <= 23: # Total, Sisa, Outstanding, Blokir
-            adjusted_width = max(adjusted_width, 22)
-        elif 24 <= col_idx <= 35: # Bulan-bulan
-            adjusted_width = max(adjusted_width, 18)
-        elif col_idx == 36: # Keterangan
-            adjusted_width = max(adjusted_width, 35)
-            
-        ws.column_dimensions[col_letter].width = adjusted_width
 
     output = io.BytesIO()
     wb.save(output)
